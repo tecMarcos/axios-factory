@@ -1,14 +1,16 @@
 services:
   collector:
     build: .
-    # Linux VPS: attach to the existing browser's loopback CDP endpoint.
-    network_mode: host
-    env_file: .env
+    init: true
+    environment:
+      UPSELLER_PROFILE_DIR: /private/upseller-profile
     volumes:
       - ./data:/app/data
+      - /opt/axios-factory/runtime/upseller-profile:/private/upseller-profile
     read_only: true
     tmpfs:
       - /tmp
+    shm_size: 1gb
     security_opt:
       - no-new-privileges:true
     cap_drop:

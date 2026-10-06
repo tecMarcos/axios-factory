@@ -7,3 +7,5 @@ data
 *.log
 test-results
 playwright-report
+runtime
+*profile*

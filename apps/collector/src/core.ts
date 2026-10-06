@@ -38,9 +38,10 @@ function at(value: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((v, key) => object(v)[key], value);
 }
 export function parseResponse(status: number, contentType: string, body: unknown, contract: Contract) {
-  if ([401, 403].includes(status) || (status >= 300 && status < 400) || contentType.includes('text/html')) throw new CollectorError('AUTH_REQUIRED_OR_ACCESS_DENIED');
+  if ([401, 403].includes(status) || (status >= 300 && status < 400) || contentType.includes('text/html')) throw new CollectorError('AUTH_REQUIRED');
   if (status !== 200) throw new CollectorError('HTTP_ERROR');
   if (!contentType.includes('application/json')) throw new CollectorError('INVALID_CONTENT_TYPE');
+  if ([401, 403, '401', '403'].includes(at(body, contract.successPath) as string | number)) throw new CollectorError('AUTH_REQUIRED');
   if (at(body, contract.successPath) !== contract.successValue) throw new CollectorError('API_REJECTED_OR_SESSION_EXPIRED');
   const list = at(body, contract.ordersPath), rawTotal = at(body, contract.totalPath);
   if (!Array.isArray(list) || !['string', 'number'].includes(typeof rawTotal) || String(rawTotal).trim() === '') throw new CollectorError('INVALID_SCHEMA');

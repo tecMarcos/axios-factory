@@ -9,3 +9,5 @@ data/*
 storage-state*
 playwright-report/
 test-results/
+runtime/
+*profile*/

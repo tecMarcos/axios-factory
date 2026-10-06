@@ -1,35 +1,21 @@
-import { chromium } from 'playwright';
+import { openSession } from './session.js';
 import { collect, CollectorError, parseResponse, profiles, type Contract } from './core.js';
 import { save } from './output.js';
-function required(name: string) {
-  const value = process.env[name];
-  if (!value) throw new CollectorError('MISSING_CONFIGURATION');
-  return value;
-}
 function log(event: string, fields: Record<string, string | number> = {}) {
   process.stderr.write(JSON.stringify({ time: new Date().toISOString(), event, ...fields }) + '\n');
 }
 async function main() {
   // Never log arbitrary exceptions: browser errors can contain endpoints/credentials.
-  const contract: Contract = { ordersPath: required('ORDERS_PATH'), totalPath: required('TOTAL_PATH'), successPath: required('SUCCESS_PATH'), successValue: JSON.parse(required('SUCCESS_VALUE')) };
-  const encoding = required('REQUEST_ENCODING');
-  if (!['json', 'form'].includes(encoding)) throw new CollectorError('INVALID_CONFIGURATION');
+  const contract: Contract = { ordersPath: 'data.list', totalPath: 'data.total', successPath: 'code', successValue: 0 };
   const maxPages = Number(process.env.MAX_PAGES ?? 1000);
   if (!Number.isSafeInteger(maxPages) || maxPages < 1) throw new CollectorError('INVALID_CONFIGURATION');
-  const endpoint = new URL(required('CDP_URL'));
-  if (!['http:', 'https:', 'ws:', 'wss:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw new CollectorError('INVALID_CDP_URL');
-  const browser = await chromium.connectOverCDP(endpoint.toString(), { timeout: 15000 });
+  const context = await openSession();
   try {
-    const candidates = browser.contexts().filter(context => context.pages().some(page => {
-      try { return new URL(page.url()).origin === 'https://app.upseller.com'; } catch { return false; }
-    }));
-    if (candidates.length !== 1) throw new CollectorError('AUTHENTICATED_CONTEXT_REQUIRED');
-    const context = candidates[0]!;
     let authenticated = false;
     const result = await collect(async (profile, pageNum) => {
       const payload = { ...profiles[profile], pageNum };
       const response = await context.request.post('https://app.upseller.com/api/order/index', {
-        ...(encoding === 'json' ? { data: payload } : { form: payload }),
+        form: payload,
         headers: { Origin: 'https://app.upseller.com', Referer: 'https://app.upseller.com/' },
         timeout: 30000, maxRedirects: 0, maxRetries: 0,
       });
@@ -53,9 +39,10 @@ async function main() {
     for (const product of result.summary.products) console.log(`${product.name.replace(/[\x00-\x1f\x7f]/g, ' ')}: ${product.units}`);
     console.log(`\nOutput:\n${dir}/orders.json\n${dir}/summary.json`);
     log('collection_complete', { orders: result.summary.uniqueOrders, units: result.summary.units });
-  } finally { await browser.close(); } // Disconnects a connected browser; does not close the owner's browser.
+  } finally { await context.close(); }
 }
 main().catch(error => {
   log('collection_failed', { code: error instanceof CollectorError ? error.code : 'RUNTIME_FAILURE' });
+  if (error instanceof CollectorError && error.code === 'AUTH_REQUIRED') console.error('AUTH_REQUIRED: execute npm run login para autenticar manualmente.');
   process.exitCode = 1;
 });

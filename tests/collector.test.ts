@@ -31,7 +31,7 @@ test('paginates both profiles, deduplicates across profiles and sums units', asy
 test('empty successful response is valid; unknown envelopes fail closed', () => {
   assert.deepEqual(parseResponse(200, 'application/json', { code: 0, data: { list: [], total: 0 } }, contract), { orders: [], total: 0 });
   assert.throws(() => parseResponse(200, 'application/json', { code: 0, data: {} }, contract));
-  assert.throws(() => parseResponse(200, 'application/json', { code: 401, data: { list: [], total: 0 } }, contract), /API_REJECTED/);
+  assert.throws(() => parseResponse(200, 'application/json', { code: 401, data: { list: [], total: 0 } }, contract), /AUTH_REQUIRED/);
 });
 test('detects authentication, redirect, HTML and HTTP errors', () => {
   for (const status of [401, 403, 302]) assert.throws(() => parseResponse(status, '', null, contract), /AUTH_REQUIRED/);
@@ -58,4 +58,22 @@ test('publishes matching files and replaces snapshot on subsequent collection', 
     await save(empty, dir);
     assert.deepEqual(JSON.parse(await readFile(join(dir, 'orders.json'), 'utf8')), []);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+test('private profile rejects project paths and permissive directories', async () => {
+  const { privateProfile } = await import('../apps/collector/src/session.js');
+  const { chmod, stat, symlink } = await import('node:fs/promises');
+  const root = await mkdtemp(join(tmpdir(), 'profile-test-'));
+  const project = join(root, 'project');
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(project);
+  try {
+    await assert.rejects(privateProfile(join(project, 'session'), project), /PROFILE_MUST_BE_EXTERNAL/);
+    await assert.rejects(privateProfile('relative', project), /PROFILE_MUST_BE_EXTERNAL/);
+    const profile = await privateProfile(join(root, 'private'), project);
+    assert.equal((await stat(profile)).mode & 0o777, 0o700);
+    await chmod(profile, 0o755);
+    await assert.rejects(privateProfile(profile, project), /PROFILE_PERMISSIONS_REQUIRED/);
+    await symlink(project, join(root, 'alias'));
+    await assert.rejects(privateProfile(join(root, 'alias'), project), /PROFILE_MUST_BE_EXTERNAL/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
