@@ -1,0 +1,15 @@
+services:
+  collector:
+    build: .
+    # Linux VPS: attach to the existing browser's loopback CDP endpoint.
+    network_mode: host
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
