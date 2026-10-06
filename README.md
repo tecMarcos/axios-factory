@@ -6,6 +6,8 @@ Node.js + TypeScript + Playwright. Coleta TO_SHIP e TO_PICKUP por POST em
 
 **Estado:** contrato confirmado pelo usuário; 9 testes locais aprovados. Aceite real na VPS pendente.
 
+Guia completo: [instalação, autenticação e operação Docker](docs/operations.md).
+
 ## Executar e autenticar
 
 Requer Node.js 24 e Playwright Chromium. O perfil deve ficar fora do repositório,

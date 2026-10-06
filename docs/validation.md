@@ -18,10 +18,25 @@ encoding configurável; substituída por Chromium com perfil persistente e form.
   de modo explícito e exigem documentação sanitizada antes de alterar o contrato.
 
 ## Aceite pendente
-1. Disponibilizar terminal/conexão segura autorizada ao host Ubuntu com Docker.
+1. Operador executará deploy e aceite separadamente; o agente não acessará a VPS nesta etapa.
 2. Provisionar perfil privado e fazer login manual na sessão gráfica privada.
 3. Em período sem movimentação, comparar totais visíveis TO_SHIP e TO_PICKUP
    com npm run collect e Docker; registrar somente horário e contagens.
 4. Repetir após reiniciar navegador/container/VPS para verificar persistência.
 5. Expirar sessão e confirmar AUTH_REQUIRED sem publicar novo snapshot.
 6. Documentar divergências sem respostas brutas, HAR, segredos ou dados pessoais.
+
+## Registro a preencher após execução real
+
+| Evidência | Resultado |
+| --- | --- |
+| Data/hora e timezone | Pendente |
+| Commit executado | Pendente |
+| Docker build e coleta (código de saída) | Pendente |
+| TO_SHIP navegador / collector | Pendente |
+| TO_PICKUP navegador / collector | Pendente |
+| Pedidos únicos / unidades | Pendente |
+| Persistência após reinício | Pendente |
+| Sessão expirada retorna AUTH_REQUIRED | Pendente |
+
+Registrar somente contagens e códigos sanitizados. Não anexar dados de pedidos ou sessão.
