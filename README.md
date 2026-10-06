@@ -4,37 +4,37 @@ Node.js + TypeScript + Playwright. Coleta TO_SHIP e TO_PICKUP por POST em
 `https://app.upseller.com/api/order/index`, pagina com 50 pedidos, deduplica por
 `orderNumber` e produz `data/orders.json` e `data/summary.json`.
 
-**Estado:** implementação local testada; contrato externo e aceite na VPS pendentes.
-Não há amostra do envelope JSON nem sessão autenticada disponível neste ambiente.
-Os caminhos em `.env.example` são exemplos, não campos confirmados do UpSeller.
+**Estado:** contrato confirmado pelo usuário; 9 testes locais aprovados. Aceite real na VPS pendente.
 
-## Executar
+## Executar e autenticar
 
-Requer Node.js 24, Linux e um Chromium já autenticado no UpSeller, com uma aba
-aberta em `https://app.upseller.com` e CDP acessível somente em loopback/rede privada.
-O collector conecta ao contexto existente usando Playwright; não inicia login,
-exporta cookies ou grava `storageState`. Não exponha CDP à internet.
+Requer Node.js 24 e Playwright Chromium. O perfil deve ficar fora do repositório,
+pertencer ao usuário executor e ter permissão 0700. O processo usa umask 0077.
 
 ```sh
 npm ci
+npx playwright install --with-deps chromium
 cp .env.example .env
-# Confirmar ORDERS_PATH, TOTAL_PATH, SUCCESS_PATH, SUCCESS_VALUE e REQUEST_ENCODING.
+# Provisionar /opt/axios-factory/runtime/upseller-profile com proprietário executor e modo 0700.
+npm run login
 npm run collect
 ```
 
-`SUCCESS_VALUE` é um literal JSON (ex.: `0`, `true` ou `"OK"`). Os caminhos usam
-notação pontuada. `REQUEST_ENCODING` aceita `json` ou `form`. O primeiro POST
-bem-sucedido, com indicador de sucesso e estrutura válidos, valida a autenticação
-e também coleta a primeira página. Não existe endpoint de autenticação presumido.
-Se a API exigir cabeçalhos adicionais/CSRF, a execução falha: documentar o contrato
-antes de acrescentar suporte. Não inserir tokens no `.env`.
+O login abre Chromium com interface gráfica; exige sessão gráfica privada no host,
+acessada por conexão segura já autorizada. Não publica VNC, CDP ou portas.
+Complete login, CAPTCHA/MFA manualmente e pressione Enter para fechar e persistir.
+Login e coleta não podem usar o mesmo perfil simultaneamente. Após reinício,
+a coleta reutiliza o perfil; a validade continua sujeita ao servidor UpSeller.
 
-**Persistência:** o processo reutiliza a sessão do navegador entre coletas enquanto
-esse navegador permanece autenticado. Persistência após reiniciar o navegador
-normalmente exige guardar cookies/perfil. Como o escopo proíbe esse armazenamento,
-o collector não cria um perfil persistente; essa decisão precisa ser esclarecida
-antes de implementar login persistente próprio. Não compartilhar cookies, tokens,
-HAR ou respostas brutas na tarefa.
+Contrato fixado: POST form-urlencoded, sucesso estrito `code === 0`, lista
+`data.list`, total `data.total`. O primeiro POST válido confirma autenticação.
+HTTP 401/403, redirecionamento, HTML e códigos JSON 401/403 retornam
+`AUTH_REQUIRED` e instruem novo login. Outros códigos de negócio são rejeitados;
+o código específico de expiração UpSeller ainda não foi observado. Não há
+fallback, captura de HAR, exportação de cookies ou contorno de segurança.
+
+O perfil é o único armazenamento privado da sessão; nunca incluir em Git,
+ZIP, logs ou artefatos. Não expor seu diretório por servidor web.
 
 ## Saídas e proteção de dados
 
@@ -64,16 +64,21 @@ leitores. Não versionar nem publicar `data/`.
 
 ## Docker na VPS Linux
 
-O navegador autenticado é externo ao container; nenhuma imagem de navegador ou
-volume de credenciais é criado. O CDP em `127.0.0.1:9222` é acessível pelo modo
-host do Compose. O usuário `node` (UID 1000) precisa poder escrever em `data/`.
+A imagem instala Chromium correspondente ao Playwright e executa como usuário
+`node` (UID 1000). O bind mount privado persiste fora do repositório e sobrevive
+ao descarte do container e reinício da VPS. Nenhuma porta é publicada.
 
 ```sh
+sudo install -d -m 0700 -o 1000 -g 1000 /opt/axios-factory/runtime/upseller-profile
 mkdir -p data
-# Ajustar proprietário/permissões de data para UID 1000 no host, se necessário.
+# Garantir que data seja gravável pelo UID 1000.
 docker compose build
 docker compose run --rm collector
 ```
+
+Faça o login manual no host com o mesmo perfil, versão Chromium compatível e UID
+1000, usando a sessão gráfica privada. Feche esse navegador antes da coleta Docker.
+O Compose não provisiona acesso gráfico remoto. Não execute login como root.
 
 ## Verificar
 
@@ -86,5 +91,5 @@ Testes usam dados sintéticos: paginação, deduplicação, totais, privacidade,
 autenticação inválida, limites e publicação de arquivos. Docker não foi executado
 neste ambiente porque o binário não está instalado. Ver [validação](docs/validation.md).
 
-Referências de implementação: [Playwright CDP](https://playwright.dev/docs/api/class-browsertype#browser-type-connect-over-cdp)
+Referências de implementação: [Playwright](https://playwright.dev/docs/api/class-browsertype#browser-type-launch-persistent-context)
 e [APIRequestContext](https://playwright.dev/docs/api/class-apirequestcontext).
