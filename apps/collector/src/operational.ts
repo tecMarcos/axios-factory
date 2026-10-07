@@ -6,11 +6,15 @@ export function validateTimezone(timeZone: string) { new Intl.DateTimeFormat('en
 function parts(epoch: number, timeZone: string) {
   return Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(epoch).map(p => [p.type, p.value]));
 }
-function parseLocal(value: unknown, zone: string): number | null {
+function parseLocal(value: unknown, zone: string): { epoch: number; minutePrecision: boolean } | null {
   if (typeof value !== 'string') return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
-  if (!m) return null;
+  const brazilian = /^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})$/.exec(value);
+  const m = brazilian
+    ? [brazilian[0], brazilian[3], brazilian[2], brazilian[1], brazilian[4], brazilian[5]]
+    : /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (!m || m[0] !== value) return null;
   const [, y, mo, d, h, mi, s = '00'] = m;
+  if (+y! < 1 || +mo! < 1 || +mo! > 12 || +d! < 1 || +d! > 31 || +h! > 23 || +mi! > 59 || +s > 59) return null;
   const base = Date.UTC(+y!, +mo! - 1, +d!, +h!, +mi!, +s);
   const candidates = new Set<number>();
   // Probe offsets on both sides to reject ambiguous/nonexistent DST wall times.
@@ -20,7 +24,7 @@ function parseLocal(value: unknown, zone: string): number | null {
     const candidate = base - offset, c = parts(candidate, zone);
     if (c.year === y && c.month === mo && c.day === d && c.hour === h && c.minute === mi && c.second === s) candidates.add(candidate);
   }
-  return candidates.size === 1 ? [...candidates][0]! : null;
+  return candidates.size === 1 ? { epoch: [...candidates][0]!, minutePrecision: m[6] === undefined } : null;
 }
 export function normalizeDeadline(timestamp: unknown, formatted: unknown, zone = defaultTimezone) {
   validateTimezone(zone);
@@ -35,9 +39,14 @@ export function normalizeDeadline(timestamp: unknown, formatted: unknown, zone =
   let warning: string | null = null;
   if (present(timestamp) && epoch === null) warning = 'INVALID_DEADLINE';
   else if (present(formatted) && local === null) warning = 'INVALID_DEADLINE_TEXT';
-  else if (epoch !== null && local !== null && Math.floor(epoch / 60000) !== Math.floor(local / 60000)) warning = 'DEADLINE_MISMATCH';
+  else if (epoch !== null && local !== null) {
+    const sameMinute = Math.floor(epoch / 60000) === Math.floor(local.epoch / 60000);
+    // Minute-only text may round up an epoch ending in :59; retain the original epoch.
+    const roundedMinute = local.minutePrecision && epoch < local.epoch && local.epoch - epoch <= 1000;
+    if (!sameMinute && !roundedMinute) warning = 'DEADLINE_MISMATCH';
+  }
   if (warning) epoch = null;
-  else epoch ??= local;
+  else epoch ??= local?.epoch ?? null;
   return { deadline: epoch === null ? null : new Date(epoch).toISOString(), deadlineEpoch: epoch, deadlineWarning: warning };
 }
 export function calculateHoursRemaining(deadline: number | null, now: number) {

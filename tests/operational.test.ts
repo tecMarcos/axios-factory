@@ -33,3 +33,62 @@ test('product ties sort by descending quantity even with unknown deadlines',()=>
 test('top N limits terminal products',()=>{const s=aggregateProduction(buildProductionQueue([order(),order('B',12,'Q')],now));assert.equal((operationalSummary(s,'America/Sao_Paulo',1).match(/ un/g)??[]).length,1);assert.throws(()=>operationalSummary(s,'UTC',-1));});
 for(const name of ['summary','production-queue','production-summary']) test(`${name}.json replaced through atomic snapshot`,async()=>{const dir=await mkdtemp(join(tmpdir(),'operational-'));try{const first=await collect(async p=>({orders:p==='TO_SHIP'?[normalize(raw())]:[],total:p==='TO_SHIP'?1:0}),1000,now);await save(first,dir);const previous=await readlink(join(dir,'.current'));const empty=await collect(async()=>({orders:[],total:0}),1000,now+1);await save(empty,dir);assert.notEqual(await readlink(join(dir,'.current')),previous);assert.equal(await readlink(join(dir,`${name}.json`)),`.current/${name}.json`);const value=JSON.parse(await readFile(join(dir,`${name}.json`),'utf8'));assert.deepEqual(value,name==='summary'?empty.summary:name==='production-queue'?empty.productionQueue:empty.productionSummary);}finally{await rm(dir,{recursive:true,force:true});}});
 test('failed publication preserves previous snapshot',async()=>{const dir=await mkdtemp(join(tmpdir(),'operational-'));try{const result=await collect(async()=>({orders:[],total:0}),1000,now);await save(result,dir);const previous=await readlink(join(dir,'.current'));await unlink(join(dir,'production-summary.json'));await writeFile(join(dir,'production-summary.json'),'occupied');await assert.rejects(save(result,dir));assert.equal(await readlink(join(dir,'.current')),previous);}finally{await rm(dir,{recursive:true,force:true});}});
+
+for (const [text, epoch] of [
+  ['05/10/2026 23:59', Date.UTC(2026, 9, 6, 2, 59)],
+  ['08/10/2026 22:36', Date.UTC(2026, 9, 9, 1, 36)],
+] as const) {
+  test(`real Brazilian deadline ${text} uses Sao Paulo timezone`, () => {
+    assert.deepEqual(normalizeDeadline(null, text, 'America/Sao_Paulo'), {
+      deadline: new Date(epoch).toISOString(), deadlineEpoch: epoch, deadlineWarning: null,
+    });
+  });
+  test(`reconciles epoch seconds and milliseconds with ${text}`, () => {
+    for (const delta of [-1000, -1, 0, 1000, 59000, 59999]) {
+      for (const timestamp of [epoch + delta, (epoch + delta) / 1000, String((epoch + delta) / 1000)]) {
+        assert.deepEqual(normalizeDeadline(timestamp, text), {
+          deadline: new Date(epoch + delta).toISOString(), deadlineEpoch: epoch + delta, deadlineWarning: null,
+        });
+      }
+    }
+  });
+  test(`real divergences with ${text} fail safe`, () => {
+    for (const delta of [-3600000, -60000, -1001, 60000, 3600000]) {
+      assert.deepEqual(normalizeDeadline(epoch + delta, text), {
+        deadline: null, deadlineEpoch: null, deadlineWarning: 'DEADLINE_MISMATCH',
+      });
+    }
+  });
+}
+test('Brazilian deadline syntax is strict', () => {
+  for (const text of ['5/10/2026 23:59', '05/1/2026 23:59', '05/10/26 23:59', '05/10/2026 3:59', '05/10/2026 23:9', '05/10/2026 23:59:00', '05/10/2026T23:59', ' 05/10/2026 23:59', '05/10/2026 23:59 ', '05/10/2026 23:59Z', '05/10/2026 23:59\n']) {
+    assert.equal(normalizeDeadline(null, text).deadlineWarning, 'INVALID_DEADLINE_TEXT', text);
+  }
+});
+test('Brazilian calendar and clock components reject impossible dates', () => {
+  for (const text of ['00/10/2026 23:59', '32/10/2026 23:59', '31/04/2026 23:59', '29/02/2026 23:59', '29/02/2100 23:59', '05/00/2026 23:59', '05/13/2026 23:59', '05/10/0000 23:59', '05/10/2026 24:00', '05/10/2026 23:60']) {
+    assert.deepEqual(normalizeDeadline(now, text), { deadline: null, deadlineEpoch: null, deadlineWarning: 'INVALID_DEADLINE_TEXT' }, text);
+  }
+  assert.equal(normalizeDeadline(null, '29/02/2024 23:59').deadlineEpoch, Date.UTC(2024, 2, 1, 2, 59));
+});
+test('Brazilian text honors configured timezone and rejects DST gaps and ambiguity', () => {
+  assert.equal(normalizeDeadline(null, '08/10/2026 22:36', 'UTC').deadlineEpoch, Date.UTC(2026, 9, 8, 22, 36));
+  for (const text of ['08/03/2026 02:30', '01/11/2026 01:30']) {
+    assert.equal(normalizeDeadline(null, text, 'America/New_York').deadlineWarning, 'INVALID_DEADLINE_TEXT');
+  }
+});
+test('one-second boundary tolerance requires minute-only text', () => {
+  const epoch = Date.UTC(2026, 9, 9, 1, 35, 59);
+  assert.equal(normalizeDeadline(epoch, '2026-10-08 22:36').deadlineEpoch, epoch);
+  assert.equal(normalizeDeadline(epoch, '2026-10-08 22:36:00').deadlineWarning, 'DEADLINE_MISMATCH');
+});
+test('invalid epoch still fails safe with valid Brazilian text', () => {
+  assert.equal(normalizeDeadline('invalid', '08/10/2026 22:36').deadlineWarning, 'INVALID_DEADLINE');
+});
+test('real Brazilian fields flow through order normalization into priority', () => {
+  const epoch = Date.UTC(2026, 9, 9, 1, 36, 59);
+  const normalized = normalize({ ...raw(), orderTimeoutTime: epoch / 1000, orderTimeoutTimeStr: '08/10/2026 22:36' });
+  assert.equal(normalized.deadlineWarning, null);
+  assert.equal(normalized.deadlineEpoch, epoch);
+  assert.equal(calculatePriority(normalized.deadlineEpoch, epoch - 3 * 3600000), 'CRITICAL');
+});

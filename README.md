@@ -132,7 +132,8 @@ preserva seu formato. Não há alteração de autenticação ou sessão.
 
 `orderTimeoutTime` numérico é Unix: valores positivos menores que 100000000000
 são segundos; os demais são milissegundos. `deadlineEpoch` sempre usa milissegundos
-UTC e `deadline` ISO UTC (`Z`). Texto `YYYY-MM-DD HH:mm[:ss]` (também separador `T`)
+UTC e `deadline` ISO UTC (`Z`). Texto brasileiro estrito `DD/MM/YYYY HH:mm` ou `YYYY-MM-DD HH:mm[:ss]`
+(também separador `T` no formato ano-mês-dia)
 é interpretado em `BUSINESS_TIMEZONE`, default `America/Sao_Paulo`, nunca na timezone
 do host. Sem timestamp, esse texto válido pode fornecer o deadline. Formatos não
 suportados, datas impossíveis e horários locais ambíguos/inexistentes por DST
@@ -140,6 +141,10 @@ resultam em deadline null. Se qualquer fonte presente for inválida, ou as fonte
 discordarem no minuto, a política fail-safe é UNKNOWN com código sanitizado em
 `deadlineWarning` e log sem dados brutos. Nenhum prazo é inventado. A timezone é
 validada antes da sessão e também usada na apresentação do terminal.
+A reconciliação aceita fontes no mesmo minuto e, somente para texto sem segundos,
+epoch até 1 segundo antes do início do minuto textual (ex.: `22:35:59` e `22:36`).
+Quando consistentes, o epoch original é preservado, inclusive segundos/milissegundos.
+O parser valida os componentes e o calendário sem parsing implícito de strings por `Date`.
 
 O instante de coleta é capturado uma vez ao iniciar `collect`, injetável como seu
 terceiro argumento (epoch ms). `hoursRemaining = (deadlineEpoch - now) / 3600000`.
