@@ -21,6 +21,6 @@ export async function privateProfile(path: string, project = fileURLToPath(new U
 
 export async function openSession(headless = true) {
   process.umask(0o077);
-  const profile = await privateProfile(process.env.UPSELLER_PROFILE_DIR ?? '/opt/axios-factory/runtime/upseller-profile');
+  const profile = await privateProfile(process.env.UPSELLER_PROFILE_DIR ?? '/opt/axios-factory-runtime/upseller-profile');
   return chromium.launchPersistentContext(profile, { headless, acceptDownloads: false });
 }

@@ -25,7 +25,7 @@ async function main() {
         if (status === 200 && contentType.includes('application/json')) {
           try { body = await response.json(); } catch { throw new CollectorError('INVALID_JSON'); }
         }
-        const parsed = parseResponse(status, contentType, body, contract);
+        const parsed = parseResponse(status, contentType, body, contract, profile);
         if (!authenticated) { log('authentication_ok'); authenticated = true; }
         log('page_collected', { profile, pageNum, count: parsed.orders.length, total: parsed.total });
         return parsed;
@@ -34,7 +34,7 @@ async function main() {
     const dir = process.env.OUTPUT_DIR ?? 'data';
     await save(result, dir);
     console.log('UpSeller Collector\nAuthentication: OK\n');
-    console.log(`TO_SHIP: ${result.summary.counts.TO_SHIP} pedidos\nTO_PICKUP: ${result.summary.counts.TO_PICKUP} pedidos\n`);
+    console.log(`TO_INVOICE: ${result.summary.counts.TO_INVOICE} pedidos\nTO_SHIP: ${result.summary.counts.TO_SHIP} pedidos\nTO_PRINT: ${result.summary.counts.TO_PRINT} pedidos\n  Não impressas: ${result.summary.print.notPrinted}\n  Impressas: ${result.summary.print.printed}\nTO_PICKUP: ${result.summary.counts.TO_PICKUP} pedidos\n`);
     console.log(`Pedidos únicos: ${result.summary.uniqueOrders}\nUnidades: ${result.summary.units}\n\nProdutos:`);
     for (const product of result.summary.products) console.log(`${product.name.replace(/[\x00-\x1f\x7f]/g, ' ')}: ${product.units}`);
     console.log(`\nOutput:\n${dir}/orders.json\n${dir}/summary.json`);

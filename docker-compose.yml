@@ -6,7 +6,7 @@ services:
       UPSELLER_PROFILE_DIR: /private/upseller-profile
     volumes:
       - ./data:/app/data
-      - /opt/axios-factory/runtime/upseller-profile:/private/upseller-profile
+      - /opt/axios-factory-runtime/upseller-profile:/private/upseller-profile
     read_only: true
     tmpfs:
       - /tmp

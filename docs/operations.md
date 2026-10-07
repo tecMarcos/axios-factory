@@ -24,7 +24,7 @@ provisione um usuário dedicado ou adapte explicitamente o UID da imagem e as
 permissões antes de continuar. Não use permissões 0777.
 
 ```sh
-sudo install -d -m 0700 -o 1000 -g 1000 /opt/axios-factory/runtime/upseller-profile
+sudo install -d -m 0700 -o 1000 -g 1000 /opt/axios-factory-runtime/upseller-profile
 sudo install -d -m 0700 -o 1000 -g 1000 data
 ```
 
@@ -55,7 +55,7 @@ docker compose run --rm collector
 ```
 
 O container executa `npm run collect`, valida autenticação no primeiro POST,
-coleta ambos os perfis, pagina, deduplica, normaliza e publica:
+coleta os quatro perfis, pagina, deduplica, normaliza e publica:
 
 - `data/orders.json`: pedidos com campos permitidos.
 - `data/summary.json`: totais por perfil, pedidos únicos, unidades e produtos.
@@ -86,7 +86,7 @@ do link `.current`. Nunca publique esse diretório.
 ## Aceite real (pendente)
 
 Em período sem movimentação de pedidos, registre data/hora e timezone, commit,
-totais TO_SHIP/TO_PICKUP visíveis no UpSeller e no collector, pedidos únicos e
+totais TO_INVOICE/TO_SHIP/TO_PRINT/TO_PICKUP e subdivisões de impressão visíveis no UpSeller e no collector, pedidos únicos e
 unidades. Repita após reinício para conferir persistência e teste sessão expirada
 para confirmar `AUTH_REQUIRED` sem novo snapshot. Não envie orders.json nem
 capturas que mostrem dados pessoais. Use [o registro de validação](validation.md).

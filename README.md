@@ -1,10 +1,10 @@
-# UpSeller Collector V0.1
+# UpSeller Collector V0.2
 
-Node.js + TypeScript + Playwright. Coleta TO_SHIP e TO_PICKUP por POST em
+Node.js + TypeScript + Playwright. Coleta TO_INVOICE, TO_SHIP, TO_PRINT e TO_PICKUP por POST em
 `https://app.upseller.com/api/order/index`, pagina com 50 pedidos, deduplica por
 `orderNumber` e produz `data/orders.json` e `data/summary.json`.
 
-**Estado:** contrato confirmado pelo usuário; 9 testes locais aprovados. Aceite real na VPS pendente.
+**Estado:** contrato confirmado pelo usuário; 22 testes locais aprovados. Aceite real na VPS pendente.
 
 Guia completo: [instalação, autenticação e operação Docker](docs/operations.md).
 
@@ -17,7 +17,7 @@ pertencer ao usuário executor e ter permissão 0700. O processo usa umask 0077.
 npm ci
 npx playwright install --with-deps chromium
 cp .env.example .env
-# Provisionar /opt/axios-factory/runtime/upseller-profile com proprietário executor e modo 0700.
+# Provisionar /opt/axios-factory-runtime/upseller-profile com proprietário executor e modo 0700.
 npm run login
 npm run collect
 ```
@@ -47,7 +47,7 @@ supor timezone/moeda; contagens são inteiros não negativos. Campos opcionais
 ausentes viram `null`. Valores de campos permitidos não passam por classificação
 semântica de PII; não devem conter dados de comprador inseridos livremente.
 
-Pedidos repetidos entre perfis contam uma vez nas unidades; TO_PICKUP prevalece
+Pedidos incluem queues com todas as filas; repetidos entre perfis contam uma vez nas unidades; TO_PICKUP prevalece
 para metadados quando os itens são idênticos. Itens divergentes interrompem a
 coleta. Resumo por produto agrupa pelo nome e soma `productCount`; contagens por
 perfil são anteriores à deduplicação. A API não oferece snapshot confirmado:
@@ -71,7 +71,7 @@ A imagem instala Chromium correspondente ao Playwright e executa como usuário
 ao descarte do container e reinício da VPS. Nenhuma porta é publicada.
 
 ```sh
-sudo install -d -m 0700 -o 1000 -g 1000 /opt/axios-factory/runtime/upseller-profile
+sudo install -d -m 0700 -o 1000 -g 1000 /opt/axios-factory-runtime/upseller-profile
 mkdir -p data
 # Garantir que data seja gravável pelo UID 1000.
 docker compose build
@@ -95,3 +95,26 @@ neste ambiente porque o binário não está instalado. Ver [validação](docs/va
 
 Referências de implementação: [Playwright](https://playwright.dev/docs/api/class-browsertype#browser-type-launch-persistent-context)
 e [APIRequestContext](https://playwright.dev/docs/api/class-apirequestcontext).
+
+## Perfis V0.2
+
+| Perfil | Tela |
+| --- | --- |
+| TO_INVOICE | Para Emitir |
+| TO_SHIP | Para Enviar |
+| TO_PRINT | Para Imprimir |
+| TO_PICKUP | Para Retirada |
+
+TO_PRINT usa uma única consulta paginada. A classificação local usa estritamente
+`isPrintLabel=0` → `PRINT_LABEL_NOT_PRINTED` e
+`isPrintLabel=1` → `PRINT_LABEL_PRINTED`, persistida em `printLabelState`.
+Campo ausente ou diferente de 0/1 interrompe a coleta com
+`INVALID_PRINT_LABEL_STATE`; não há conversão de strings nem classificação presumida.
+Não há coleta de Para Reservar.
+
+A allowlist foi ampliada somente com `queues` e `printLabelState`.
+O campo bruto `isPrintLabel` não é persistido. `summary.json` mantém `counts`
+e acrescenta `queues` (as mesmas contagens) e `print: { notPrinted, printed }`.
+`uniqueOrders`, `units`, `products` e `collectedAt` são preservados.
+As contagens por fila incluem pedidos compartilhados; as unidades globais não.
+Todos os perfis usam pageSize=50, pageNum inicial 1 e MAX_PAGES.
