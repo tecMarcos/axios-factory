@@ -10,8 +10,8 @@ export async function save(result: Awaited<ReturnType<typeof collect>>, dir: str
   let published = false;
   const pending = join(dir, `.current-${randomUUID()}`);
   try {
-    for (const name of ['orders', 'summary'] as const) {
-      await writeFile(join(snapshot, `${name}.json`), JSON.stringify(result[name], null, 2) + '\n', { mode: 0o600 });
+    for (const [name, value] of Object.entries({ orders: result.orders, summary: result.summary, 'production-queue': result.productionQueue, 'production-summary': result.productionSummary })) {
+      await writeFile(join(snapshot, `${name}.json`), JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
       const target = `.current/${name}.json`;
       try { await symlink(target, join(dir, `${name}.json`)); }
       catch (e) {

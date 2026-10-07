@@ -1,3 +1,4 @@
+import { normalizeDeadline, defaultTimezone, buildProductionQueue, aggregateProduction } from './operational.js';
 export class CollectorError extends Error {
   constructor(public code: string) { super(code); }
 }
@@ -19,7 +20,7 @@ function text(value: unknown, required = false): string | null {
   return String(value);
 }
 export type PrintLabelState = 'PRINT_LABEL_NOT_PRINTED' | 'PRINT_LABEL_PRINTED';
-export function normalize(value: unknown, profile?: Profile) {
+export function normalize(value: unknown, profile?: Profile, timezone = defaultTimezone) {
   const row = object(value);
   if (!Array.isArray(row.orderItemList)) throw new CollectorError('INVALID_ITEMS');
   let printLabelState: PrintLabelState | undefined;
@@ -28,6 +29,7 @@ export function normalize(value: unknown, profile?: Profile) {
     printLabelState = row.isPrintLabel === 0 ? 'PRINT_LABEL_NOT_PRINTED' : 'PRINT_LABEL_PRINTED';
   }
   return {
+    ...normalizeDeadline(row.orderTimeoutTime, row.orderTimeoutTimeStr, timezone),
     ...(printLabelState === undefined ? {} : { printLabelState }),
     orderNumber: text(row.orderNumber, true)!, platform: text(row.platform), shopName: text(row.shopName),
     orderCreateTime: text(row.orderCreateTime), orderPayTime: text(row.orderPayTime),
@@ -46,7 +48,7 @@ export type Contract = { ordersPath: string; totalPath: string; successPath: str
 function at(value: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((v, key) => object(v)[key], value);
 }
-export function parseResponse(status: number, contentType: string, body: unknown, contract: Contract, profile?: Profile) {
+export function parseResponse(status: number, contentType: string, body: unknown, contract: Contract, profile?: Profile, timezone = defaultTimezone) {
   if ([401, 403].includes(status) || (status >= 300 && status < 400) || contentType.includes('text/html')) throw new CollectorError('AUTH_REQUIRED');
   if (status !== 200) throw new CollectorError('HTTP_ERROR');
   if (!contentType.includes('application/json')) throw new CollectorError('INVALID_CONTENT_TYPE');
@@ -56,10 +58,10 @@ export function parseResponse(status: number, contentType: string, body: unknown
   if (!Array.isArray(list) || !['string', 'number'].includes(typeof rawTotal) || String(rawTotal).trim() === '') throw new CollectorError('INVALID_SCHEMA');
   const total = Number(rawTotal);
   if (!Number.isSafeInteger(total) || total < 0) throw new CollectorError('INVALID_TOTAL');
-  return { orders: list.map(value => normalize(value, profile)), total };
+  return { orders: list.map(value => normalize(value, profile, timezone)), total };
 }
 export type FetchPage = (profile: Profile, page: number) => Promise<{ orders: Order[]; total: number }>;
-export async function collect(fetchPage: FetchPage, maxPages = 1000) {
+export async function collect(fetchPage: FetchPage, maxPages = 1000, now = Date.now()) {
   const unique = new Map<string, Order & { queues: Profile[] }>();
   const counts = { TO_INVOICE: 0, TO_SHIP: 0, TO_PRINT: 0, TO_PICKUP: 0 };
   const print = { notPrinted: 0, printed: 0 };
@@ -104,5 +106,7 @@ export async function collect(fetchPage: FetchPage, maxPages = 1000) {
     if (!Number.isSafeInteger(units)) throw new CollectorError('QUANTITY_OVERFLOW');
     products.set(item.productName, (products.get(item.productName) ?? 0) + item.productCount);
   }
-  return { orders, summary: { collectedAt: new Date().toISOString(), counts, queues: { ...counts }, print, uniqueOrders: orders.length, units, products: [...products].map(([name, units]) => ({ name, units })).sort((a,b) => a.name.localeCompare(b.name)) } };
+  const productionQueue = buildProductionQueue(orders, now);
+  const productionSummary = aggregateProduction(productionQueue);
+  return { orders, productionQueue, productionSummary, summary: { collectedAt: new Date(now).toISOString(), counts, queues: { ...counts }, print, uniqueOrders: orders.length, units, products: [...products].map(([name, units]) => ({ name, units })).sort((a,b) => a.name.localeCompare(b.name)) } };
 }

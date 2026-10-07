@@ -1,3 +1,4 @@
+import { defaultTimezone, validateTimezone, operationalSummary } from './operational.js';
 import { openSession } from './session.js';
 import { collect, CollectorError, parseResponse, profiles, type Contract } from './core.js';
 import { save } from './output.js';
@@ -9,6 +10,9 @@ async function main() {
   const contract: Contract = { ordersPath: 'data.list', totalPath: 'data.total', successPath: 'code', successValue: 0 };
   const maxPages = Number(process.env.MAX_PAGES ?? 1000);
   if (!Number.isSafeInteger(maxPages) || maxPages < 1) throw new CollectorError('INVALID_CONFIGURATION');
+  const timezone = validateTimezone(process.env.BUSINESS_TIMEZONE ?? defaultTimezone);
+  const topN = Number(process.env.OPERATIONAL_TOP_N ?? 10);
+  if (!Number.isSafeInteger(topN) || topN < 0) throw new CollectorError('INVALID_CONFIGURATION');
   const context = await openSession();
   try {
     let authenticated = false;
@@ -25,19 +29,21 @@ async function main() {
         if (status === 200 && contentType.includes('application/json')) {
           try { body = await response.json(); } catch { throw new CollectorError('INVALID_JSON'); }
         }
-        const parsed = parseResponse(status, contentType, body, contract, profile);
+        const parsed = parseResponse(status, contentType, body, contract, profile, timezone);
         if (!authenticated) { log('authentication_ok'); authenticated = true; }
         log('page_collected', { profile, pageNum, count: parsed.orders.length, total: parsed.total });
         return parsed;
       } finally { await response.dispose(); }
     }, maxPages);
     const dir = process.env.OUTPUT_DIR ?? 'data';
+    for (const order of result.orders) if (order.deadlineWarning) log('deadline_warning', { code: order.deadlineWarning });
     await save(result, dir);
+    console.log(operationalSummary(result.productionSummary, timezone, topN));
     console.log('UpSeller Collector\nAuthentication: OK\n');
     console.log(`TO_INVOICE: ${result.summary.counts.TO_INVOICE} pedidos\nTO_SHIP: ${result.summary.counts.TO_SHIP} pedidos\nTO_PRINT: ${result.summary.counts.TO_PRINT} pedidos\n  Não impressas: ${result.summary.print.notPrinted}\n  Impressas: ${result.summary.print.printed}\nTO_PICKUP: ${result.summary.counts.TO_PICKUP} pedidos\n`);
     console.log(`Pedidos únicos: ${result.summary.uniqueOrders}\nUnidades: ${result.summary.units}\n\nProdutos:`);
     for (const product of result.summary.products) console.log(`${product.name.replace(/[\x00-\x1f\x7f]/g, ' ')}: ${product.units}`);
-    console.log(`\nOutput:\n${dir}/orders.json\n${dir}/summary.json`);
+    console.log(`\nOutput:\n${dir}/orders.json\n${dir}/summary.json\n${dir}/production-queue.json\n${dir}/production-summary.json`);
     log('collection_complete', { orders: result.summary.uniqueOrders, units: result.summary.units });
   } finally { await context.close(); }
 }

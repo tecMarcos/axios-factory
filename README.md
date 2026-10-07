@@ -118,3 +118,59 @@ e acrescenta `queues` (as mesmas contagens) e `print: { notPrinted, printed }`.
 `uniqueOrders`, `units`, `products` e `collectedAt` são preservados.
 As contagens por fila incluem pedidos compartilhados; as unidades globais não.
 Todos os perfis usam pageSize=50, pageNum inicial 1 e MAX_PAGES.
+
+## V0.3 — prioridade operacional (aceite local; VPS ainda não certificada)
+
+`npm run collect` também publica `data/production-queue.json` (pedidos ordenados,
+items por allowlist, queues completas, estágio operacional) e
+`data/production-summary.json` (totais, contagem por prioridade e produtos).
+Os quatro arquivos pertencem ao mesmo snapshot, publicado por rename atômico do
+link `.current`. Leitores de múltiplos arquivos que precisam de consistência devem
+resolver `.current` uma vez e ler daquele diretório. `orders.json` mantém os campos
+anteriores e adiciona `deadline`, `deadlineEpoch` e `deadlineWarning`; `summary.json`
+preserva seu formato. Não há alteração de autenticação ou sessão.
+
+`orderTimeoutTime` numérico é Unix: valores positivos menores que 100000000000
+são segundos; os demais são milissegundos. `deadlineEpoch` sempre usa milissegundos
+UTC e `deadline` ISO UTC (`Z`). Texto `YYYY-MM-DD HH:mm[:ss]` (também separador `T`)
+é interpretado em `BUSINESS_TIMEZONE`, default `America/Sao_Paulo`, nunca na timezone
+do host. Sem timestamp, esse texto válido pode fornecer o deadline. Formatos não
+suportados, datas impossíveis e horários locais ambíguos/inexistentes por DST
+resultam em deadline null. Se qualquer fonte presente for inválida, ou as fontes
+discordarem no minuto, a política fail-safe é UNKNOWN com código sanitizado em
+`deadlineWarning` e log sem dados brutos. Nenhum prazo é inventado. A timezone é
+validada antes da sessão e também usada na apresentação do terminal.
+
+O instante de coleta é capturado uma vez ao iniciar `collect`, injetável como seu
+terceiro argumento (epoch ms). `hoursRemaining = (deadlineEpoch - now) / 3600000`.
+As funções puras estão em `apps/collector/src/operational.ts`.
+
+| Prioridade | Horas restantes |
+|---|---|
+| OVERDUE | <= 0 (inclui o instante exato do vencimento) |
+| CRITICAL | > 0 e <= 6 |
+| URGENT | > 6 e <= 24 |
+| ATTENTION | > 24 e <= 48 |
+| NORMAL | > 48 |
+| UNKNOWN | sem prazo confiável |
+
+A fila segue essa ordem, depois deadline crescente; UNKNOWN fica no fim.
+Estágio: TO_INVOICE > TO_SHIP > TO_PRINT > TO_PICKUP, sem remover queues.
+A deduplicação global por `orderNumber` ocorre antes de calcular produção: um
+pedido em várias queues soma unidades uma única vez. Metadados da última queue
+continuam prevalecendo como na V0.2. Produtos agrupam por tupla productId/variationId;
+se algum ID faltar, o fallback conservador é orderNumber + índice do item,
+isolando itens sem identidade confiável (pode fragmentar a consolidação).
+Nunca agrupamos só pelo nome. `orderCount` conta pedidos distintos do grupo.
+Produtos ordenam por maior prioridade, prazo mais próximo e quantidade decrescente.
+
+Todos os itens ativos representam **necessidade potencial de produção**. Estoque
+não é considerado. O domínio separado permite incorporar futuramente
+availableStock, reservedStock e productionRequired sem inventar valores agora.
+O terminal mostra prioridades e até `OPERATIONAL_TOP_N` produtos (default 10;
+inteiro >= 0), com prazo em horas e horário no fuso comercial.
+
+Validação manual pendente na VPS: executar coleta real, comparar timestamps e
+texto UpSeller com BUSINESS_TIMEZONE, conferir níveis/limites de prioridade,
+quantidades e os quatro arquivos, além da execução Docker e sessão persistente.
+A V0.3 não está certificada em produção por estes testes locais.

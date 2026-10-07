@@ -3,6 +3,8 @@ services:
     build: .
     init: true
     environment:
+      BUSINESS_TIMEZONE: ${BUSINESS_TIMEZONE:-America/Sao_Paulo}
+      OPERATIONAL_TOP_N: ${OPERATIONAL_TOP_N:-10}
       UPSELLER_PROFILE_DIR: /private/upseller-profile
     volumes:
       - ./data:/app/data

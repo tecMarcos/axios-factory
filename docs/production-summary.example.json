@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2026-10-08T12:00:00.000Z",
+  "totals": {
+    "orders": 2,
+    "units": 3
+  },
+  "priorityCounts": {
+    "OVERDUE": 0,
+    "CRITICAL": 1,
+    "URGENT": 1,
+    "ATTENTION": 0,
+    "NORMAL": 0,
+    "UNKNOWN": 0
+  },
+  "products": [
+    {
+      "productId": "EXAMPLE-P",
+      "variationId": "EXAMPLE-V",
+      "productName": "Produto fictício",
+      "productAttr": "Azul",
+      "totalQuantity": 3,
+      "highestPriority": "CRITICAL",
+      "nearestDeadline": "2026-10-08T15:00:00.000Z",
+      "orderCount": 2
+    }
+  ]
+}
