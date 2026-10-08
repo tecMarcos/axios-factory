@@ -208,12 +208,10 @@ Escaladas para URGENT, CRITICAL e OVERDUE geram NEW_URGENT, NEW_CRITICAL e
 NEW_OVERDUE, incluindo saltos de nível. Prioridade igual ou reduzida não alerta.
 Pedidos ausentes são removidos do estado; reaparecimento recebe nova baseline.
 
-Dry-run gera logs sanitizados e atualiza apenas a prioridade observada, evitando
-repetir a mesma transição; não registra envio em `lastAlertedPriority`.
-Assim, transições consumidas no dry-run não são reenviadas automaticamente por
-um futuro provider. A futura ativação deverá estabelecer uma baseline explícita.
-A interface `NotificationSender` permite implementar envio depois: somente o
-sucesso de todo o lote permite persistir o estado. Falha mantém o arquivo anterior.
+Dry-run gera mensagens sem rede e não modifica notification-state.json, preservando
+transições para um envio posterior. No modo real, o bootstrap silencioso mantém a
+baseline da V0.4A (sem marcar envio); transições só são persistidas após sucesso
+de todo o lote. Falha mantém o arquivo anterior.
 Uma falha após entrega parcial ou antes do rename pode repetir mensagens já
 entregues na tentativa seguinte (não há garantia exactly-once).
 
@@ -230,44 +228,25 @@ conferir alerta e estado e repetir check para confirmar ausência de repetição
 Para desativar, interrompa o agendamento externo. Preserve o estado no rollback.
 Esta entrega tem aceite local; não certifica V0.4 em produção.
 
-### Adapter WhatsApp isolado
+### WhatsApp — Evolution API
 
-`apps/collector/src/whatsapp-sender.ts` exporta `WhatsAppNotificationSender`,
-compatível com `NotificationSender`. Esta entrega adiciona somente o adapter:
-`notify:daily` e `notify:check` mantêm o comportamento da V0.4A e ainda não o
-instanciam. Gerador, transições, bootstrap e persistência não foram alterados.
+Os comandos notify:daily e notify:check usam WhatsAppNotificationSender.
+Configure EVOLUTION_API_URL (URL base), EVOLUTION_API_KEY, EVOLUTION_INSTANCE e
+WHATSAPP_RECIPIENT_JID (somente dígitos@g.us ou dígitos@s.whatsapp.net).
+O adapter envia POST para a URL base + /message/sendText/{instance}, com header
+apikey e Content-Type: application/json, e body { "number": "<JID>", "text": "<mensagem>" }.
+A instância é codificada como um segmento da URL; barras finais da base são removidas.
 
-O provider da VPS **não foi identificado**: não há configuração/documentação de
-gateway no repositório. O contrato genérico implementado é:
+WHATSAPP_ENABLED=false e NOTIFICATION_DRY_RUN=true são os defaults seguros.
+Envio exige enabled=true e dry-run=false. Disabled/dry-run não fazem rede;
+dry-run não grava estado. Bootstrap silencioso real preserva a baseline existente
+sem registrar entrega; havendo alertas, o estado só muda após todos os envios terem sucesso.
+WHATSAPP_TIMEOUT_MS=10000 limita cada tentativa; não há retry interno.
+Somente HTTP 200/201 é sucesso. Outros status, redirects, timeout e falhas de rede
+falham de forma fechada. Sucesso HTTP não certifica entrega/leitura no WhatsApp.
 
-- Endpoint: `POST WHATSAPP_BASE_URL` (URL **completa**, inclusive o caminho).
-- Auth: `Authorization: Bearer <WHATSAPP_TOKEN>`.
-- Content-Type: `application/json`.
-- Payload: `{ "instance": "<WHATSAPP_INSTANCE>", "recipient": "<WHATSAPP_RECIPIENT>", "text": "<mensagem original>" }`.
-
-Não se presume compatibilidade com Evolution API ou outro provider. Antes da
-integração na VPS, confirmar rota, autenticação, nomes dos campos e formato do
-destinatário; adaptar o contrato se necessário e depois conectar o sender à CLI.
-Tokens devem ficar somente no ambiente privado, fora do Git.
-
-O adapter só tenta envio com `WHATSAPP_ENABLED=true` **e**
-`NOTIFICATION_DRY_RUN=false`. Defaults são `false` e `true`, respectivamente.
-Base URL, token, instance e recipient são obrigatórios para envio. Timeout:
-`WHATSAPP_TIMEOUT_MS=10000`, inteiro positivo em milissegundos. URLs aceitam
-HTTP/HTTPS sem credenciais embutidas, query ou fragmento; prefira HTTPS fora de
-rede privada. Redirects são rejeitados para evitar encaminhar credenciais.
-
-Cada envio faz uma tentativa, sem retry. HTTP 2xx representa sucesso HTTP (não
-confirma leitura/entrega no WhatsApp); demais status, timeout, falha de rede ou
-configuração inválida lançam erros sanitizados. Disabled/dry-run também rejeitam
-`send()` sem rede, evitando que um consumidor de estado registre envio fictício.
-O runner existente pode continuar usando seu próprio dry-run para visualizar
-mensagens, sem invocar o adapter.
-
-Logs contêm apenas eventos, provider genérico, status/código e recipient
-mascarado (`******1234` para números longos). Não incluem token, URL, texto ou
-resposta do provider. Nenhum dado de configuração é persistido em JSON.
-Para desativar rapidamente: `WHATSAPP_ENABLED=false` e
-`NOTIFICATION_DRY_RUN=true`. Testes usam apenas mocks/HTTP local; nenhum envio
-real é realizado. Validação e habilitação operacional na VPS permanecem manuais;
-esta entrega não certifica produção.
+Logs incluem apenas evento, provider, status/código e JID mascarado. Não incluem
+API key, URL, texto enviado ou resposta do provider. Segredos ficam no ambiente
+privado, fora do Git. URLs HTTP/HTTPS não aceitam credenciais, query ou fragmento.
+Testes usam mocks/HTTP local, sem mensagens reais. A validação na VPS e a
+habilitação operacional continuam manuais; esta entrega não certifica produção.

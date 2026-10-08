@@ -52,7 +52,7 @@ export async function runNotifications(mode: 'daily' | 'check', dir: string, opt
       next.orders[order.orderNumber] = { lastPriority: order.priority, lastAlertedPriority: type && !options.dryRun ? order.priority : before?.lastAlertedPriority ?? null };
     }
     // No state is committed until all deliveries succeed. A partial batch can retry successful messages.
-    await writeNotificationState(statePath, next);
+    if (!options.dryRun) await writeNotificationState(statePath, next);
     log({ event: previous ? 'notification_skipped' : 'notification_bootstrap', mode: previous ? 'check_complete' : 'silent' });
   } finally { await lock.close(); await unlink(lockPath); }
 }
