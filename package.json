@@ -9,7 +9,9 @@
     "collect": "node --env-file-if-exists=.env --import tsx apps/collector/src/cli.ts",
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "login": "node --env-file-if-exists=.env --import tsx apps/collector/src/login.ts"
+    "login": "node --env-file-if-exists=.env --import tsx apps/collector/src/login.ts",
+    "notify:daily": "node --env-file-if-exists=.env --import tsx apps/collector/src/notify-cli.ts daily",
+    "notify:check": "node --env-file-if-exists=.env --import tsx apps/collector/src/notify-cli.ts check"
   },
   "dependencies": {
     "playwright": "1.63.0",

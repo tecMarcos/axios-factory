@@ -179,3 +179,54 @@ Validação manual pendente na VPS: executar coleta real, comparar timestamps e
 texto UpSeller com BUSINESS_TIMEZONE, conferir níveis/limites de prioridade,
 quantidades e os quatro arquivos, além da execução Docker e sessão persistente.
 A V0.3 não está certificada em produção por estes testes locais.
+
+## V0.4 — mensagens locais (primeira metade)
+
+Após `npm run collect`, execute `npm run notify:daily` para gerar o
+`DAILY_SUMMARY` ou `npm run notify:check` para observar mudanças de prioridade.
+Os comandos leem os snapshots V0.3, sem Playwright, nova coleta ou alteração
+nos arquivos operacionais. O agendamento fica externo.
+
+Defaults: `WHATSAPP_TOP_PRODUCTS=5`, `NOTIFICATION_BOOTSTRAP_MODE=silent`,
+`NOTIFICATION_DRY_RUN=true` e `BUSINESS_TIMEZONE=America/Sao_Paulo`.
+`DATA_DIR` seleciona o diretório (default `data`). Não há adapter WhatsApp,
+URL, token ou destinatário nesta entrega. `NOTIFICATION_DRY_RUN=false` no CLI
+falha fechado: ainda não existe sender configurado para envio real.
+
+O resumo omite contagens zero, respeita a ordenação agregada da V0.3 e mostra
+os primeiros produtos, os demais como `+ X outros itens na fila`, atraso mais
+antigo em horas completas e próximo prazo futuro na timezone configurada.
+As prioridades são as do snapshot; execute nova coleta para atualizá-las.
+Somente nomes/variações de produtos, quantidades, prazos e contagens chegam às
+mensagens. Identificadores de pedidos e campos pessoais não são exibidos.
+
+Na primeira execução de `notify:check`, `data/notification-state.json` é
+criado atomicamente com as prioridades atuais, sem alertas retroativos.
+O arquivo é dado operacional local, ignorado pelo Git; não distribua um estado
+preenchido entre instalações. Cada pedido registra `lastPriority` e
+`lastAlertedPriority` (inicialmente `null`). Novos pedidos entram silenciosamente.
+Escaladas para URGENT, CRITICAL e OVERDUE geram NEW_URGENT, NEW_CRITICAL e
+NEW_OVERDUE, incluindo saltos de nível. Prioridade igual ou reduzida não alerta.
+Pedidos ausentes são removidos do estado; reaparecimento recebe nova baseline.
+
+Dry-run gera logs sanitizados e atualiza apenas a prioridade observada, evitando
+repetir a mesma transição; não registra envio em `lastAlertedPriority`.
+Assim, transições consumidas no dry-run não são reenviadas automaticamente por
+um futuro provider. A futura ativação deverá estabelecer uma baseline explícita.
+A interface `NotificationSender` permite implementar envio depois: somente o
+sucesso de todo o lote permite persistir o estado. Falha mantém o arquivo anterior.
+Uma falha após entrega parcial ou antes do rename pode repetir mensagens já
+entregues na tentativa seguinte (não há garantia exactly-once).
+
+A leitura fixa a geração `.current` do collector e valida schema, prioridades,
+prazos, duplicatas e equivalência do summary com a agregação da fila. Dados
+inválidos/ausentes/inconsistentes falham sem gerar mensagens ou atualizar estado.
+Um lock exclusivo impede dois checks simultâneos. Se o processo for encerrado
+abruptamente, confirme que não há check ativo antes de remover
+`data/.notification.lock`. Não remova o estado para tentar novamente após falha.
+
+Validação manual na VPS: coletar, executar daily em dry-run, executar check para
+bootstrap e repetir check (sem alertas); após uma nova coleta com escalada,
+conferir alerta e estado e repetir check para confirmar ausência de repetição.
+Para desativar, interrompa o agendamento externo. Preserve o estado no rollback.
+Esta entrega tem aceite local; não certifica V0.4 em produção.
