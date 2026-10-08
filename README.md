@@ -189,8 +189,7 @@ nos arquivos operacionais. O agendamento fica externo.
 
 Defaults: `WHATSAPP_TOP_PRODUCTS=5`, `NOTIFICATION_BOOTSTRAP_MODE=silent`,
 `NOTIFICATION_DRY_RUN=true` e `BUSINESS_TIMEZONE=America/Sao_Paulo`.
-`DATA_DIR` seleciona o diretório (default `data`). Não há adapter WhatsApp,
-URL, token ou destinatário nesta entrega. `NOTIFICATION_DRY_RUN=false` no CLI
+`DATA_DIR` seleciona o diretório (default `data`). O adapter isolado descrito abaixo ainda não está conectado à CLI. `NOTIFICATION_DRY_RUN=false` no CLI
 falha fechado: ainda não existe sender configurado para envio real.
 
 O resumo omite contagens zero, respeita a ordenação agregada da V0.3 e mostra
@@ -230,3 +229,45 @@ bootstrap e repetir check (sem alertas); após uma nova coleta com escalada,
 conferir alerta e estado e repetir check para confirmar ausência de repetição.
 Para desativar, interrompa o agendamento externo. Preserve o estado no rollback.
 Esta entrega tem aceite local; não certifica V0.4 em produção.
+
+### Adapter WhatsApp isolado
+
+`apps/collector/src/whatsapp-sender.ts` exporta `WhatsAppNotificationSender`,
+compatível com `NotificationSender`. Esta entrega adiciona somente o adapter:
+`notify:daily` e `notify:check` mantêm o comportamento da V0.4A e ainda não o
+instanciam. Gerador, transições, bootstrap e persistência não foram alterados.
+
+O provider da VPS **não foi identificado**: não há configuração/documentação de
+gateway no repositório. O contrato genérico implementado é:
+
+- Endpoint: `POST WHATSAPP_BASE_URL` (URL **completa**, inclusive o caminho).
+- Auth: `Authorization: Bearer <WHATSAPP_TOKEN>`.
+- Content-Type: `application/json`.
+- Payload: `{ "instance": "<WHATSAPP_INSTANCE>", "recipient": "<WHATSAPP_RECIPIENT>", "text": "<mensagem original>" }`.
+
+Não se presume compatibilidade com Evolution API ou outro provider. Antes da
+integração na VPS, confirmar rota, autenticação, nomes dos campos e formato do
+destinatário; adaptar o contrato se necessário e depois conectar o sender à CLI.
+Tokens devem ficar somente no ambiente privado, fora do Git.
+
+O adapter só tenta envio com `WHATSAPP_ENABLED=true` **e**
+`NOTIFICATION_DRY_RUN=false`. Defaults são `false` e `true`, respectivamente.
+Base URL, token, instance e recipient são obrigatórios para envio. Timeout:
+`WHATSAPP_TIMEOUT_MS=10000`, inteiro positivo em milissegundos. URLs aceitam
+HTTP/HTTPS sem credenciais embutidas, query ou fragmento; prefira HTTPS fora de
+rede privada. Redirects são rejeitados para evitar encaminhar credenciais.
+
+Cada envio faz uma tentativa, sem retry. HTTP 2xx representa sucesso HTTP (não
+confirma leitura/entrega no WhatsApp); demais status, timeout, falha de rede ou
+configuração inválida lançam erros sanitizados. Disabled/dry-run também rejeitam
+`send()` sem rede, evitando que um consumidor de estado registre envio fictício.
+O runner existente pode continuar usando seu próprio dry-run para visualizar
+mensagens, sem invocar o adapter.
+
+Logs contêm apenas eventos, provider genérico, status/código e recipient
+mascarado (`******1234` para números longos). Não incluem token, URL, texto ou
+resposta do provider. Nenhum dado de configuração é persistido em JSON.
+Para desativar rapidamente: `WHATSAPP_ENABLED=false` e
+`NOTIFICATION_DRY_RUN=true`. Testes usam apenas mocks/HTTP local; nenhum envio
+real é realizado. Validação e habilitação operacional na VPS permanecem manuais;
+esta entrega não certifica produção.
