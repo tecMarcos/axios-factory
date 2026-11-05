@@ -19,6 +19,18 @@ function text(value: unknown, required = false): string | null {
   if ((typeof value !== 'string' && typeof value !== 'number') || (required && String(value).trim() === '')) throw new CollectorError('INVALID_FIELD');
   return String(value);
 }
+// Display-only fields added for the panel: unexpected shapes become null instead of failing the collection.
+function optionalText(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed.slice(0, 500);
+}
+// Product images are only kept as plain https URLs; anything else is dropped, never rejected.
+function httpsUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password ? u.href : null; } catch { return null; }
+}
 export type PrintLabelState = 'PRINT_LABEL_NOT_PRINTED' | 'PRINT_LABEL_PRINTED';
 export function normalize(value: unknown, profile?: Profile, timezone = defaultTimezone) {
   const row = object(value);
@@ -32,6 +44,9 @@ export function normalize(value: unknown, profile?: Profile, timezone = defaultT
     ...normalizeDeadline(row.orderTimeoutTime, row.orderTimeoutTimeStr, timezone),
     ...(printLabelState === undefined ? {} : { printLabelState }),
     orderNumber: text(row.orderNumber, true)!, platform: text(row.platform), shopName: text(row.shopName),
+    // Marketplace order id (Shopee order_sn / TikTok order id) and the seller's UpSeller note,
+    // which carries the personalization (e.g. the name for a Christmas ornament).
+    platformOrderId: optionalText(row.orderId), note: optionalText(row.orderComment),
     orderCreateTime: text(row.orderCreateTime), orderPayTime: text(row.orderPayTime),
     orderTimeoutTimeStr: text(row.orderTimeoutTimeStr), orderState: text(row.orderState), providerName: text(row.providerName),
     orderItemList: row.orderItemList.map(value => {
@@ -39,7 +54,7 @@ export function normalize(value: unknown, profile?: Profile, timezone = defaultT
       if (!['number', 'string'].includes(typeof item.productCount) || String(item.productCount).trim() === '') throw new CollectorError('INVALID_QUANTITY');
       const count = Number(item.productCount);
       if (!Number.isSafeInteger(count) || count < 0) throw new CollectorError('INVALID_QUANTITY');
-      return { productId: text(item.productId), productName: text(item.productName, true)!, variationId: text(item.variationId), productCount: count, price: text(item.price), productAttr: text(item.productAttr) };
+      return { productId: text(item.productId), productName: text(item.productName, true)!, variationId: text(item.variationId), productCount: count, price: text(item.price), productAttr: text(item.productAttr), productSku: optionalText(item.productSku), productImg: httpsUrl(item.productImg) };
     }),
   };
 }

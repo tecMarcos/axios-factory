@@ -75,12 +75,14 @@ export function buildProductionQueue(orders: (Order & { queues: Profile[] })[], 
     orderNumber: o.orderNumber, priority: calculatePriority(o.deadlineEpoch, now), deadline: o.deadline,
     deadlineEpoch: o.deadlineEpoch, hoursRemaining: calculateHoursRemaining(o.deadlineEpoch, now),
     queues: [...o.queues], operationalStage: selectOperationalStage(o.queues),
-    items: o.orderItemList.map(i => ({ productId: i.productId, variationId: i.variationId, productName: i.productName, productAttr: i.productAttr, quantity: i.productCount })),
+    platform: o.platform, shopName: o.shopName, platformOrderId: o.platformOrderId, note: o.note, printLabelState: o.printLabelState ?? null,
+    items: o.orderItemList.map(i => ({ productId: i.productId, variationId: i.variationId, productName: i.productName, productAttr: i.productAttr, quantity: i.productCount, productSku: i.productSku, productImg: i.productImg })),
   }))) };
 }
 export function aggregateProduction(queue: ReturnType<typeof buildProductionQueue>) {
   type Item = typeof queue.orders[number]['items'][number];
-  type Product = Omit<Item, 'quantity'> & { totalQuantity: number; highestPriority: Priority; nearestDeadline: string | null; orderCount: number };
+  // Display-only panel fields (sku, image) stay out of the aggregated summary.
+  type Product = Omit<Item, 'quantity' | 'productSku' | 'productImg'> & { totalQuantity: number; highestPriority: Priority; nearestDeadline: string | null; orderCount: number };
   const groups = new Map<string, { product: Product; orders: Set<string>; epoch: number | null }>();
   const priorityCounts = Object.fromEntries(priorities.map(p => [p, 0])) as Record<Priority, number>;
   let units = 0;

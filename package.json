@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "login": "node --env-file-if-exists=.env --import tsx apps/collector/src/login.ts",
     "notify:daily": "node --env-file-if-exists=.env --import tsx apps/collector/src/notify-cli.ts daily",
+    "panel": "node --env-file-if-exists=.env --import tsx apps/panel/src/main.ts",
     "notify:check": "node --env-file-if-exists=.env --import tsx apps/collector/src/notify-cli.ts check"
   },
   "dependencies": {
