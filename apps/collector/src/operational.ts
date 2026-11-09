@@ -75,7 +75,7 @@ export function buildProductionQueue(orders: (Order & { queues: Profile[] })[], 
     orderNumber: o.orderNumber, priority: calculatePriority(o.deadlineEpoch, now), deadline: o.deadline,
     deadlineEpoch: o.deadlineEpoch, hoursRemaining: calculateHoursRemaining(o.deadlineEpoch, now),
     queues: [...o.queues], operationalStage: selectOperationalStage(o.queues),
-    platform: o.platform, shopName: o.shopName, platformOrderId: o.platformOrderId, note: o.note, printLabelState: o.printLabelState ?? null,
+    platform: o.platform, shopName: o.shopName, platformOrderId: o.platformOrderId, note: o.note, printLabelState: o.printLabelState ?? null, scanKeys: [...o.scanKeys],
     items: o.orderItemList.map(i => ({ productId: i.productId, variationId: i.variationId, productName: i.productName, productAttr: i.productAttr, quantity: i.productCount, productSku: i.productSku, productImg: i.productImg })),
   }))) };
 }

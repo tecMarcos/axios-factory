@@ -1,6 +1,6 @@
 # Painel de pedidos (celular / tag NFC), servido pelo Traefik do Easypanel com HTTPS.
 # Subir:   sudo docker compose -f docker-compose.panel.yml --env-file /opt/axios-factory-runtime/panel.env up -d
-# O panel.env (0600, fora do repositório) contém só PANEL_TOKEN e PANEL_DOMAIN.
+# O panel.env (0600, fora do repositório) contém só PANEL_TOKEN, PANEL_DOMAIN e SCAN_KEY.
 # Lê os snapshots do coletor em modo somente leitura; não acessa UpSeller nem WhatsApp.
 name: axios-factory-panel
 services:
@@ -11,6 +11,7 @@ services:
     command: ["node", "--import", "tsx", "apps/panel/src/main.ts"]
     environment:
       PANEL_TOKEN: ${PANEL_TOKEN:?PANEL_TOKEN obrigatório}
+      SCAN_KEY: ${SCAN_KEY:-}
       DATA_DIR: /data
       PANEL_HOST: 0.0.0.0
       PANEL_PORT: "3100"

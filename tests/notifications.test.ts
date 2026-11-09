@@ -9,7 +9,7 @@ import { buildOperationalMessage, buildPriorityAlert, validateSnapshot, type Que
 import { runNotifications, writeNotificationState, ConsoleNotificationSender } from '../apps/collector/src/notification-runner.js';
 const now = Date.parse('2026-10-08T12:00:00.000Z'), opts = { now, dryRun: true };
 function fixture(hours = [-38, 3, 12, 36, 72, 80]): Queue {
-  return { generatedAt: new Date(now).toISOString(), orders: hours.map((h, i) => ({ orderNumber: `ORDER${i}`, priority: calculatePriority(now + h * 3600000, now), deadlineEpoch: now + h * 3600000, deadline: new Date(now + h * 3600000).toISOString(), hoursRemaining: h, queues: ['TO_SHIP'], operationalStage: 'NEEDS_SHIPPING', platform: 'shopee', shopName: 'loja', platformOrderId: `SHOPEE${i}`, note: null, printLabelState: null, items: [{ productId: `p${i}`, variationId: 'v', productName: `Produto ${i}`, productAttr: 'Azul', quantity: i + 1, productSku: null, productImg: null }] })) };
+  return { generatedAt: new Date(now).toISOString(), orders: hours.map((h, i) => ({ orderNumber: `ORDER${i}`, priority: calculatePriority(now + h * 3600000, now), deadlineEpoch: now + h * 3600000, deadline: new Date(now + h * 3600000).toISOString(), hoursRemaining: h, queues: ['TO_SHIP'], operationalStage: 'NEEDS_SHIPPING', platform: 'shopee', shopName: 'loja', platformOrderId: `SHOPEE${i}`, note: null, printLabelState: null, scanKeys: [], items: [{ productId: `p${i}`, variationId: 'v', productName: `Produto ${i}`, productAttr: 'Azul', quantity: i + 1, productSku: null, productImg: null }] })) };
 }
 const message = (q = fixture(), extra = {}) => buildOperationalMessage(aggregateProduction(q), q, { ...opts, ...extra });
 async function setup(t: TestContext) {

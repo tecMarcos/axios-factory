@@ -23,6 +23,7 @@ export function validateSnapshot(q: unknown, s: unknown): { queue: Queue; summar
     if (!Array.isArray(o.queues) || !o.queues.length || o.queues.some(p => !['TO_INVOICE', 'TO_SHIP', 'TO_PRINT', 'TO_PICKUP'].includes(p)) || typeof o.operationalStage !== 'string') return fail();
     // Panel fields are optional so snapshots written before they existed stay valid.
     if (![o.platform, o.shopName, o.platformOrderId, o.note, o.printLabelState].every(optionalText)) return fail();
+    if (o.scanKeys !== undefined && (!Array.isArray(o.scanKeys) || o.scanKeys.length > 20 || o.scanKeys.some(k => typeof k !== 'string' || !/^[0-9a-f]{32}$/.test(k)))) return fail();
     for (const i of o.items) {
       if (!record(i) || typeof i.productName !== 'string' || !i.productName.trim() || !nullableText(i.productAttr) || !nullableText(i.productId) || !nullableText(i.variationId) || typeof i.quantity !== 'number' || !Number.isSafeInteger(i.quantity) || i.quantity < 0) return fail();
       if (!optionalText(i.productSku) || !optionalText(i.productImg)) return fail();

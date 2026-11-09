@@ -17,7 +17,7 @@ type Item = Queue['orders'][number]['items'][number];
 const item = (name: string, extra: Partial<Item> = {}): Item => ({ productId: name, variationId: 'v', productName: name, productAttr: 'Vermelha', quantity: 1, productSku: 'SKU1', productImg: 'https://cf.shopee.com.br/file/x.jpg', ...extra });
 function order(n: number, hours: number | null, extra: Partial<Queue['orders'][number]> = {}): Queue['orders'][number] {
   const epoch = hours === null ? null : now + hours * 3600000;
-  return { orderNumber: `UP${n}`, priority: calculatePriority(epoch, now), deadline: epoch === null ? null : new Date(epoch).toISOString(), deadlineEpoch: epoch, hoursRemaining: hours, queues: ['TO_PRINT'], operationalStage: 'NEEDS_PRINT_PROCESSING', platform: 'shopee', shopName: 'jp shopee', platformOrderId: `251105AB${n}CD`, note: null, printLabelState: 'PRINT_LABEL_NOT_PRINTED', items: [item('Caneca')], ...extra };
+  return { orderNumber: `UP${n}`, priority: calculatePriority(epoch, now), deadline: epoch === null ? null : new Date(epoch).toISOString(), deadlineEpoch: epoch, hoursRemaining: hours, queues: ['TO_PRINT'], operationalStage: 'NEEDS_PRINT_PROCESSING', platform: 'shopee', shopName: 'jp shopee', platformOrderId: `251105AB${n}CD`, note: null, printLabelState: 'PRINT_LABEL_NOT_PRINTED', scanKeys: [], items: [item('Caneca')], ...extra };
 }
 const queue = (...orders: Queue['orders']): Queue => ({ generatedAt: new Date(now).toISOString(), orders });
 const html = (q: Queue, extra = {}) => renderPanel(q, { now, timezone: 'America/Sao_Paulo', nonce: 'NONCE', ...extra });
@@ -43,7 +43,7 @@ test('production queue carries panel fields and still validates', () => {
 
 test('snapshots written before the panel fields existed remain valid', () => {
   const q = queue(order(1, 3));
-  for (const o of q.orders) { for (const k of ['platform', 'shopName', 'platformOrderId', 'note', 'printLabelState'] as const) delete (o as Partial<typeof o>)[k]; for (const i of o.items) { delete (i as Partial<Item>).productImg; delete (i as Partial<Item>).productSku; } }
+  for (const o of q.orders) { for (const k of ['platform', 'shopName', 'platformOrderId', 'note', 'printLabelState', 'scanKeys'] as const) delete (o as Partial<typeof o>)[k]; for (const i of o.items) { delete (i as Partial<Item>).productImg; delete (i as Partial<Item>).productSku; } }
   assert.doesNotThrow(() => validateSnapshot(q, aggregateProduction(q)));
   assert.match(html(q), /UP1/);
 });
@@ -154,7 +154,7 @@ test('server: right token shows the panel with strict headers; anything else is 
   assert.match(body, /Nome: Ana/);
   assert.equal(ok.headers.get('cache-control'), 'no-store');
   assert.equal(ok.headers.get('referrer-policy'), 'no-referrer');
-  assert.match(ok.headers.get('content-security-policy')!, /default-src 'none'; img-src https:; style-src 'nonce-[^']+'; script-src 'nonce-[^']+'/);
+  assert.match(ok.headers.get('content-security-policy')!, /default-src 'none'; img-src https:; media-src 'self' blob: mediastream:; style-src 'nonce-[^']+'; script-src 'nonce-[^']+'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'/);
   const nonce = /script-src 'nonce-([^']+)'/.exec(ok.headers.get('content-security-policy')!)![1]!;
   assert.ok(body.includes(`<script nonce="${nonce}">`));
   for (const path of ['/', `/p/${token}x`, '/p/wrong', `/P/${token}`, `/p/${token}/extra`, '/p/%E0%A4%A']) {

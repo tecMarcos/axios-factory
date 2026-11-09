@@ -1,4 +1,5 @@
 import { normalizeDeadline, defaultTimezone, buildProductionQueue, aggregateProduction } from './operational.js';
+import { scanKeysFor } from './scan-keys.js';
 export class CollectorError extends Error {
   constructor(public code: string) { super(code); }
 }
@@ -32,7 +33,7 @@ function httpsUrl(value: unknown): string | null {
   try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password ? u.href : null; } catch { return null; }
 }
 export type PrintLabelState = 'PRINT_LABEL_NOT_PRINTED' | 'PRINT_LABEL_PRINTED';
-export function normalize(value: unknown, profile?: Profile, timezone = defaultTimezone) {
+export function normalize(value: unknown, profile?: Profile, timezone = defaultTimezone, scanSecret?: string) {
   const row = object(value);
   if (!Array.isArray(row.orderItemList)) throw new CollectorError('INVALID_ITEMS');
   let printLabelState: PrintLabelState | undefined;
@@ -47,6 +48,8 @@ export function normalize(value: unknown, profile?: Profile, timezone = defaultT
     // Marketplace order id (Shopee order_sn / TikTok order id) and the seller's UpSeller note,
     // which carries the personalization (e.g. the name for a Christmas ornament).
     platformOrderId: optionalText(row.orderId), note: optionalText(row.orderComment),
+    // Tracking number and NF-e key are kept only as keyed hashes, for barcode lookup in the panel.
+    scanKeys: scanKeysFor([row.trackingNumber, row.invoiceOurKey], scanSecret),
     orderCreateTime: text(row.orderCreateTime), orderPayTime: text(row.orderPayTime),
     orderTimeoutTimeStr: text(row.orderTimeoutTimeStr), orderState: text(row.orderState), providerName: text(row.providerName),
     orderItemList: row.orderItemList.map(value => {
@@ -63,7 +66,7 @@ export type Contract = { ordersPath: string; totalPath: string; successPath: str
 function at(value: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((v, key) => object(v)[key], value);
 }
-export function parseResponse(status: number, contentType: string, body: unknown, contract: Contract, profile?: Profile, timezone = defaultTimezone) {
+export function parseResponse(status: number, contentType: string, body: unknown, contract: Contract, profile?: Profile, timezone = defaultTimezone, scanSecret?: string) {
   if ([401, 403].includes(status) || (status >= 300 && status < 400) || contentType.includes('text/html')) throw new CollectorError('AUTH_REQUIRED');
   if (status !== 200) throw new CollectorError('HTTP_ERROR');
   if (!contentType.includes('application/json')) throw new CollectorError('INVALID_CONTENT_TYPE');
@@ -73,7 +76,7 @@ export function parseResponse(status: number, contentType: string, body: unknown
   if (!Array.isArray(list) || !['string', 'number'].includes(typeof rawTotal) || String(rawTotal).trim() === '') throw new CollectorError('INVALID_SCHEMA');
   const total = Number(rawTotal);
   if (!Number.isSafeInteger(total) || total < 0) throw new CollectorError('INVALID_TOTAL');
-  return { orders: list.map(value => normalize(value, profile, timezone)), total };
+  return { orders: list.map(value => normalize(value, profile, timezone, scanSecret)), total };
 }
 export type FetchPage = (profile: Profile, page: number) => Promise<{ orders: Order[]; total: number }>;
 export async function collect(fetchPage: FetchPage, maxPages = 1000, now = Date.now()) {
@@ -103,6 +106,8 @@ export async function collect(fetchPage: FetchPage, maxPages = 1000, now = Date.
         unique.set(order.orderNumber, {
           ...order,
           ...(previous?.printLabelState ? { printLabelState: previous.printLabelState } : {}),
+          // An order seen in several queues keeps every code any of them reported.
+          scanKeys: [...new Set([...(previous?.scanKeys ?? []), ...order.scanKeys])].sort(),
           queues: [...(previous?.queues ?? []), profile],
         });
       }

@@ -2,6 +2,7 @@ import { defaultTimezone, validateTimezone, operationalSummary } from './operati
 import { openSession } from './session.js';
 import { collect, CollectorError, parseResponse, profiles, type Contract } from './core.js';
 import { save } from './output.js';
+import { validScanSecret } from './scan-keys.js';
 function log(event: string, fields: Record<string, string | number> = {}) {
   process.stderr.write(JSON.stringify({ time: new Date().toISOString(), event, ...fields }) + '\n');
 }
@@ -11,6 +12,8 @@ async function main() {
   const maxPages = Number(process.env.MAX_PAGES ?? 1000);
   if (!Number.isSafeInteger(maxPages) || maxPages < 1) throw new CollectorError('INVALID_CONFIGURATION');
   const timezone = validateTimezone(process.env.BUSINESS_TIMEZONE ?? defaultTimezone);
+  let scanSecret: string | undefined;
+  try { scanSecret = validScanSecret(process.env.SCAN_KEY); } catch { throw new CollectorError('INVALID_CONFIGURATION'); }
   const topN = Number(process.env.OPERATIONAL_TOP_N ?? 10);
   if (!Number.isSafeInteger(topN) || topN < 0) throw new CollectorError('INVALID_CONFIGURATION');
   const context = await openSession();
@@ -29,7 +32,7 @@ async function main() {
         if (status === 200 && contentType.includes('application/json')) {
           try { body = await response.json(); } catch { throw new CollectorError('INVALID_JSON'); }
         }
-        const parsed = parseResponse(status, contentType, body, contract, profile, timezone);
+        const parsed = parseResponse(status, contentType, body, contract, profile, timezone, scanSecret);
         if (!authenticated) { log('authentication_ok'); authenticated = true; }
         log('page_collected', { profile, pageNum, count: parsed.orders.length, total: parsed.total });
         return parsed;
