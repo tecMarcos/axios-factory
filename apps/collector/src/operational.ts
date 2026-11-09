@@ -1,4 +1,5 @@
 import type { Order, Profile } from './core.js';
+import type { AccountStatus } from './accounts.js';
 export const priorities = ['OVERDUE', 'CRITICAL', 'URGENT', 'ATTENTION', 'NORMAL', 'UNKNOWN'] as const;
 export type Priority = typeof priorities[number];
 export const defaultTimezone = 'America/Sao_Paulo';
@@ -70,8 +71,9 @@ const rank = (p: Priority) => priorities.indexOf(p);
 export function sortOperationalOrders<T extends { priority: Priority; deadlineEpoch: number | null }>(orders: T[]): T[] {
   return [...orders].sort((a, b) => rank(a.priority) - rank(b.priority) || (a.deadlineEpoch ?? Infinity) - (b.deadlineEpoch ?? Infinity));
 }
-export function buildProductionQueue(orders: (Order & { queues: Profile[] })[], now: number) {
-  return { generatedAt: new Date(now).toISOString(), orders: sortOperationalOrders(orders.map(o => ({
+export function buildProductionQueue(orders: (Order & { queues: Profile[]; account?: string })[], now: number, accounts?: AccountStatus[]) {
+  return { generatedAt: new Date(now).toISOString(), ...(accounts ? { accounts: accounts.map(a => ({ ...a })) } : {}), orders: sortOperationalOrders(orders.map(o => ({
+    ...(o.account ? { account: o.account } : {}),
     orderNumber: o.orderNumber, priority: calculatePriority(o.deadlineEpoch, now), deadline: o.deadline,
     deadlineEpoch: o.deadlineEpoch, hoursRemaining: calculateHoursRemaining(o.deadlineEpoch, now),
     queues: [...o.queues], operationalStage: selectOperationalStage(o.queues),

@@ -25,6 +25,8 @@ main{padding:8px 16px 40px;max-width:720px;margin:0 auto}
 .card{background:var(--card);border:1px solid var(--line);border-left:6px solid var(--ok);border-radius:12px;padding:12px 14px;margin:10px 0}
 .p-OVERDUE{border-left-color:var(--late)}.p-CRITICAL{border-left-color:var(--crit)}.p-URGENT{border-left-color:var(--urg)}.p-ATTENTION{border-left-color:var(--att)}.p-UNKNOWN{border-left-color:var(--muted)}
 .card header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.due{margin-left:auto;font-weight:700;font-size:14px}.p-OVERDUE .due{color:var(--late)}
+.acct{border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-size:13px;font-weight:600}
+.alert{background:var(--miss);border:1px solid var(--late);border-radius:10px;padding:10px 12px;margin:10px 0 2px;font-size:15px}
 .badge{color:#fff;background:var(--muted);border-radius:6px;padding:2px 8px;font-size:13px;font-weight:700}.badge.shopee{background:var(--shopee)}.badge.tiktok{background:var(--tiktok);color:var(--bg)}
 .id{display:flex;align-items:center;gap:8px;margin:8px 0 2px;font:600 17px/1.2 ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
 .note{margin:10px 0 4px;background:var(--note);border:1px solid var(--noteline);border-radius:8px;padding:8px 10px;font-size:16px;word-break:break-word}
@@ -105,6 +107,7 @@ export function card(order: LiveOrder, o: CardOptions) {
     <article class="card p-${order.livePriority}${status === 'MISSING' ? ' flag' : ''}${o.large ? ' large' : ''}">
       <header>
         <span class="badge ${esc(order.platform ?? 'other')}">${esc(platform)}</span>
+        ${order.account ? `<span class="acct">${esc(cleanText(order.account))}</span>` : ''}
         ${order.shopName ? `<span class="muted shop">${esc(cleanText(order.shopName))}</span>` : ''}
         <span class="due">${esc(formatRemaining(order.liveHours))}</span>
       </header>
@@ -137,12 +140,18 @@ export function renderPanel(queue: Queue, options: RenderOptions): string {
 <div class="top">
   <div class="titlebar"><h1>Pedidos para produzir</h1>${o.scanHref ? `<a class="btn" href="${esc(o.scanHref)}">📷 Bipar</a>` : ''}</div>
   <div class="muted">${queue.orders.length} pedidos · atualizado às ${esc(time(generated, o.timezone))}${ageMin >= 90 ? ` · <span class="stale">dados de ${ageMin} min atrás</span>` : ageMin > 0 ? ` (há ${ageMin} min)` : ''}</div>
+  ${accountAlerts(queue)}
   <nav class="chips">${missing ? `<a class="chip warn" href="#${esc(firstMissingSection(groups, o.personalizationKeywords))}">⚠️ Sem nome <b>${missing}</b></a>` : ''}${chips}</nav>
 </div>
 <main>
 ${sections || '<p class="empty">Nenhum pedido pendente agora. 🎉</p>'}
 </main>`,
   });
+}
+
+/** An account whose collection failed (usually an expired login) is missing from the list: say so loudly. */
+export function accountAlerts(queue: Queue) {
+  return (queue.accounts ?? []).filter(a => !a.ok).map(a => `<div class="alert">⚠️ <strong>Conta ${esc(cleanText(a.name))}</strong>: ${a.error === 'AUTH_REQUIRED' || a.error === 'API_REJECTED_OR_SESSION_EXPIRED' ? 'o login no UpSeller expirou' : 'não foi possível ler os pedidos'}. Os pedidos dessa conta não aparecem aqui.</div>`).join('');
 }
 
 function firstMissingSection(groups: ReturnType<typeof groupByPriority>, keywords: string[]) {

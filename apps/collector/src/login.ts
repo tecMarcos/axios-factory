@@ -1,8 +1,13 @@
 import { openSession } from './session.js';
 import { CollectorError } from './core.js';
+import { findAccount, parseAccounts } from './accounts.js';
 import { createInterface } from 'node:readline/promises';
+// Usage: npm run login            -> first account
+//        npm run login -- Segunda -> the account with that name in UPSELLER_ACCOUNTS
 async function login() {
-  const context = await openSession(false);
+  const account = findAccount(parseAccounts(), process.argv[2]);
+  console.log(`Conta: ${account.name}`);
+  const context = await openSession(false, account.profileDir);
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   try {
     const page = context.pages()[0] ?? await context.newPage();

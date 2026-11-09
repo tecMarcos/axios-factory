@@ -13,6 +13,7 @@ const optionalText = (v: unknown) => v === undefined || nullableText(v);
 // Validate at the boundary, then compare the supplied summary with the existing V0.3 aggregator.
 export function validateSnapshot(q: unknown, s: unknown): { queue: Queue; summary: Summary } {
   if (!record(q) || !iso(q.generatedAt) || !Array.isArray(q.orders)) return fail();
+  if (q.accounts !== undefined && (!Array.isArray(q.accounts) || q.accounts.length > 10 || q.accounts.some(a => !record(a) || typeof a.name !== 'string' || !a.name.trim() || typeof a.ok !== 'boolean' || !nullableText(a.error) || !Number.isSafeInteger(a.orders) || (a.orders as number) < 0))) return fail();
   const ids = new Set<string>();
   for (const o of q.orders) {
     if (!record(o) || typeof o.orderNumber !== 'string' || !o.orderNumber.trim() || ids.has(o.orderNumber) || !priorities.includes(o.priority as Priority) || !Array.isArray(o.items)) return fail();
@@ -23,6 +24,7 @@ export function validateSnapshot(q: unknown, s: unknown): { queue: Queue; summar
     if (!Array.isArray(o.queues) || !o.queues.length || o.queues.some(p => !['TO_INVOICE', 'TO_SHIP', 'TO_PRINT', 'TO_PICKUP'].includes(p)) || typeof o.operationalStage !== 'string') return fail();
     // Panel fields are optional so snapshots written before they existed stay valid.
     if (![o.platform, o.shopName, o.platformOrderId, o.note, o.printLabelState].every(optionalText)) return fail();
+    if (o.account !== undefined && (typeof o.account !== 'string' || !o.account.trim())) return fail();
     if (o.scanKeys !== undefined && (!Array.isArray(o.scanKeys) || o.scanKeys.length > 20 || o.scanKeys.some(k => typeof k !== 'string' || !/^[0-9a-f]{32}$/.test(k)))) return fail();
     for (const i of o.items) {
       if (!record(i) || typeof i.productName !== 'string' || !i.productName.trim() || !nullableText(i.productAttr) || !nullableText(i.productId) || !nullableText(i.variationId) || typeof i.quantity !== 'number' || !Number.isSafeInteger(i.quantity) || i.quantity < 0) return fail();
@@ -51,7 +53,7 @@ function orderLine(order: Queue['orders'][number], now: number, keywords: string
   const [first] = order.items, extra = order.items.length - 1;
   const what = first ? `${first.quantity}x ${short(first.productName)}${extra > 0 ? ` +${extra} ${extra === 1 ? 'item' : 'itens'}` : ''}` : 'sem itens';
   const missing = personalizationStatus(order, keywords) === 'MISSING' ? ' ⚠️ sem nome' : '';
-  return `• ${platformLabel(order.platform)} ${displayOrderId(order)} — ${what} · ${formatRemaining(order.deadlineEpoch === null ? null : (order.deadlineEpoch - now) / 3600000)}${missing}`;
+  return `• ${platformLabel(order.platform)} ${displayOrderId(order)}${order.account ? ` (${cleanText(order.account)})` : ''} — ${what} · ${formatRemaining(order.deadlineEpoch === null ? null : (order.deadlineEpoch - now) / 3600000)}${missing}`;
 }
 const listed: Priority[] = ['OVERDUE', 'CRITICAL', 'URGENT'];
 function orderLists(queue: Queue, o: ReturnType<typeof validateMessageOptions>) {
@@ -75,7 +77,8 @@ export function buildOperationalMessage(summary: Summary, queue: Queue, input: M
   const deadlines = queue.orders.flatMap(order => order.deadlineEpoch === null ? [] : [order.deadlineEpoch]);
   const past = deadlines.filter(d => d <= o.now), future = deadlines.filter(d => d > o.now);
   const missingNames = queue.orders.filter(order => personalizationStatus(order, o.personalizationKeywords) === 'MISSING').length;
-  return ['Axios Factory — Prioridades', '', ...counts(summary), ...orderLists(queue, o), ...(missingNames ? ['', `✏️ Personalizados sem nome no UpSeller: ${missingNames}`] : []), '', 'Produção prioritária:', ...products(summary, o.topProducts), '', ...(past.length ? [`Atraso mais antigo: ${Math.floor((o.now - Math.min(...past)) / 3600000)}h`] : []), `Próximo prazo: ${future.length ? date(Math.min(...future), o.timezone) : 'nenhum conhecido'}`, '', `Pedidos: ${summary.totals.orders}`, `Unidades: ${summary.totals.units}`, ...(o.panelUrl ? ['', `📋 Painel: ${o.panelUrl}`] : [])].join('\n');
+  const failed = (queue.accounts ?? []).filter(a => !a.ok).map(a => `⚠️ Conta ${cleanText(a.name)}: ${a.error === 'AUTH_REQUIRED' || a.error === 'API_REJECTED_OR_SESSION_EXPIRED' ? 'login no UpSeller expirou' : 'falha ao ler pedidos'} — pedidos dela não estão na lista`);
+  return ['Axios Factory — Prioridades', ...(failed.length ? ['', ...failed] : []), '', ...counts(summary), ...orderLists(queue, o), ...(missingNames ? ['', `✏️ Personalizados sem nome no UpSeller: ${missingNames}`] : []), '', 'Produção prioritária:', ...products(summary, o.topProducts), '', ...(past.length ? [`Atraso mais antigo: ${Math.floor((o.now - Math.min(...past)) / 3600000)}h`] : []), `Próximo prazo: ${future.length ? date(Math.min(...future), o.timezone) : 'nenhum conhecido'}`, '', `Pedidos: ${summary.totals.orders}`, `Unidades: ${summary.totals.units}`, ...(o.panelUrl ? ['', `📋 Painel: ${o.panelUrl}`] : [])].join('\n');
 }
 export function buildPriorityAlert(type: AlertType, order: Queue['orders'][number], summary: Summary, input: MessageOptions): string {
   const o = validateMessageOptions(input);

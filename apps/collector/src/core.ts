@@ -1,5 +1,6 @@
 import { normalizeDeadline, defaultTimezone, buildProductionQueue, aggregateProduction } from './operational.js';
 import { scanKeysFor } from './scan-keys.js';
+import type { AccountStatus } from './accounts.js';
 export class CollectorError extends Error {
   constructor(public code: string) { super(code); }
 }
@@ -79,7 +80,8 @@ export function parseResponse(status: number, contentType: string, body: unknown
   return { orders: list.map(value => normalize(value, profile, timezone, scanSecret)), total };
 }
 export type FetchPage = (profile: Profile, page: number) => Promise<{ orders: Order[]; total: number }>;
-export async function collect(fetchPage: FetchPage, maxPages = 1000, now = Date.now()) {
+/** Every queue of one UpSeller account, deduplicated across queues. */
+export async function collectOrders(fetchPage: FetchPage, maxPages = 1000) {
   const unique = new Map<string, Order & { queues: Profile[] }>();
   const counts = { TO_INVOICE: 0, TO_SHIP: 0, TO_PRINT: 0, TO_PICKUP: 0 };
   const print = { notPrinted: 0, printed: 0 };
@@ -118,6 +120,31 @@ export async function collect(fetchPage: FetchPage, maxPages = 1000, now = Date.
     if (!complete) throw new CollectorError('MAX_PAGES_EXCEEDED');
     counts[profile] = seen.size;
   }
+  return { orders: [...unique.values()], counts, print };
+}
+export type AccountCollection = Awaited<ReturnType<typeof collectOrders>> & { account?: string };
+
+/** Single-account collection (the original behaviour). */
+export async function collect(fetchPage: FetchPage, maxPages = 1000, now = Date.now()) {
+  return finalize([await collectOrders(fetchPage, maxPages)], now);
+}
+
+/**
+ * Merge one or more account collections into the files the panel and notifications read.
+ * An order number already taken by an earlier account is skipped (same shop linked to both accounts).
+ */
+export function finalize(parts: AccountCollection[], now = Date.now(), accounts?: AccountStatus[], onDuplicate: (account: string | undefined) => void = () => {}) {
+  const unique = new Map<string, Order & { queues: Profile[]; account?: string }>();
+  const counts = { TO_INVOICE: 0, TO_SHIP: 0, TO_PRINT: 0, TO_PICKUP: 0 };
+  const print = { notPrinted: 0, printed: 0 };
+  for (const part of parts) {
+    for (const p of Object.keys(counts) as Profile[]) counts[p] += part.counts[p];
+    print.notPrinted += part.print.notPrinted; print.printed += part.print.printed;
+    for (const order of part.orders) {
+      if (unique.has(order.orderNumber)) { onDuplicate(part.account); continue; }
+      unique.set(order.orderNumber, part.account ? { ...order, account: part.account } : order);
+    }
+  }
   const orders = [...unique.values()].sort((a, b) => a.orderNumber.localeCompare(b.orderNumber));
   const products = new Map<string, number>();
   let units = 0;
@@ -126,7 +153,7 @@ export async function collect(fetchPage: FetchPage, maxPages = 1000, now = Date.
     if (!Number.isSafeInteger(units)) throw new CollectorError('QUANTITY_OVERFLOW');
     products.set(item.productName, (products.get(item.productName) ?? 0) + item.productCount);
   }
-  const productionQueue = buildProductionQueue(orders, now);
+  const productionQueue = buildProductionQueue(orders, now, accounts);
   const productionSummary = aggregateProduction(productionQueue);
-  return { orders, productionQueue, productionSummary, summary: { collectedAt: new Date(now).toISOString(), counts, queues: { ...counts }, print, uniqueOrders: orders.length, units, products: [...products].map(([name, units]) => ({ name, units })).sort((a,b) => a.name.localeCompare(b.name)) } };
+  return { orders, productionQueue, productionSummary, summary: { collectedAt: new Date(now).toISOString(), counts, queues: { ...counts }, print, uniqueOrders: orders.length, units, products: [...products].map(([name, units]) => ({ name, units })).sort((a,b) => a.name.localeCompare(b.name)), ...(accounts ? { accounts } : {}) } };
 }
