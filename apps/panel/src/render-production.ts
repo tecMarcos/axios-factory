@@ -1,6 +1,6 @@
 import type { Queue } from '../../collector/src/notifications.js';
 import { cleanText, formatRemaining, platformLabel, stageLabel } from '../../collector/src/orders-view.js';
-import type { ComponentMap } from '../../production/src/component-map.js';
+import { handTypeFromTitle, type ComponentMap } from '../../production/src/component-map.js';
 import { nameStatuses } from '../../production/src/names.js';
 import { buildProductionView } from '../../production/src/production.js';
 import { computeSyncHealth, type History } from '../../production/src/sync-health.js';
@@ -60,8 +60,9 @@ export function renderProduction(queue: Queue, map: ComponentMap, history: Histo
     const names = order.nameValidation;
     const items = order.items.map(item => {
       const r = item.resolution;
-      const breakdown = r.kind === 'mapped' ? ` → ${parts(r.parts)}${r.attrChanged ? ' · variante mudou, revisar mapa' : ''}` : r.kind === 'unmapped_christmas' ? ' · sem mapa' : '';
-      return `<li>${item.quantity}× ${text(item.productAttr || item.productName)}${breakdown}</li>`;
+      const breakdown = r.kind === 'mapped' ? ` → ${parts(r.parts)}${r.attrChanged ? ' · variante mudou, revisar mapa' : ''}${r.titleMismatch ? ' · <strong>título não bate com o tipo de mão do mapa, revisar</strong>' : ''}` : r.kind === 'unmapped_christmas' ? ' · sem mapa' : '';
+      const listing = r.kind === 'mapped' && r.hand ? `<div class="muted">Anúncio: ${text(item.productName)} · ${esc(r.hand.label)}</div>` : '';
+      return `<li>${item.quantity}× ${text(item.productAttr || item.productName)}${breakdown}${listing}</li>`;
     }).join('');
     const platformClass = order.platform === 'shopee' || order.platform === 'tiktok' ? order.platform : 'other';
     return `<article class="card p-${order.livePriority}">
@@ -81,7 +82,7 @@ export function renderProduction(queue: Queue, map: ComponentMap, history: Histo
   }).join('');
   const variants = unmapped.map(v => `<li>${text(v.productName)}${v.productAttr ? ` · ${text(v.productAttr)}` : ''}
     ${v.variationId ? ` · variante ${text(v.variationId)}` : ''} · ${v.orderCount} pedido(s)
-    ${v.reason ? ` · ${text(v.reason)}` : ''}${v.guess ? ` · sugestão: ${parts(v.guess)}` : ''}</li>`).join('');
+    ${v.reason ? ` · ${text(v.reason)}` : ''}${(h => h.type || h.ambiguous ? ` · ${esc(h.label)}` : '')(handTypeFromTitle(v.productName))}${v.guess ? ` · sugestão: ${parts(v.guess)}` : ''}</li>`).join('');
   return shell({
     title: 'Produção', nonce: o.nonce, noScript: true, refreshSeconds: o.refreshSeconds,
     extraHead: `<style nonce="${esc(o.nonce)}">${css}</style>`,

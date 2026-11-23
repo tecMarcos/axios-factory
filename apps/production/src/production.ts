@@ -37,10 +37,10 @@ export function buildProductionView(queue: Queue, map: ComponentMap, now: number
       const { resolution, productId, variationId, productName, productAttr } = item;
       if (resolution.kind === 'mapped') {
         addParts(parts, resolution.parts);
-        if (!packed && !resolution.confirmed) addParts(totals.unconfirmedParts, resolution.parts);
+        if (!packed && (!resolution.confirmed || resolution.titleMismatch)) addParts(totals.unconfirmedParts, resolution.parts);
         expectedNames += resolution.expectedNames;
         if (resolution.expectedNames > 0) personalizedLines++;
-        mappingPending ||= !resolution.confirmed || resolution.attrChanged;
+        mappingPending ||= !resolution.confirmed || resolution.attrChanged || resolution.titleMismatch;
       } else if (resolution.kind === 'unmapped_christmas') {
         mappingPending = true;
         const key = JSON.stringify(productId && variationId && variationId !== '0' ? [productId, variationId] : [productId, variationId, productName, productAttr]);

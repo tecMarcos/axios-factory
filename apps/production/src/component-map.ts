@@ -4,7 +4,7 @@ import type { QueueOrder } from '../../collector/src/orders-view.js';
 type Parts = Record<string, number>;
 type Variant = {
   productId: string; anuncio: string; variante: string; componentes: Parts;
-  confirmado: boolean; pendencia?: string; fonte?: string;
+  confirmado: boolean; pendencia?: string; fonte?: string; regra?: string;
 };
 export type ComponentMap = {
   versao: number;
@@ -29,7 +29,8 @@ export function validateComponentMap(json: unknown): ComponentMap {
     if (!nonblank(id) || !record(variant) || !nonblank(variant.productId) || !nonblank(variant.anuncio)
       || typeof variant.variante !== 'string' || typeof variant.confirmado !== 'boolean' || !record(variant.componentes)
       || (variant.pendencia !== undefined && typeof variant.pendencia !== 'string')
-      || (variant.fonte !== undefined && typeof variant.fonte !== 'string')) return invalid();
+      || (variant.fonte !== undefined && typeof variant.fonte !== 'string')
+      || (variant.regra !== undefined && typeof variant.regra !== 'string')) return invalid();
     const parts = Object.entries(variant.componentes);
     if (!parts.length || parts.some(([part, count]) => !Object.hasOwn(components, part) || !positiveInteger(count))) return invalid();
   }
@@ -49,21 +50,41 @@ function unitCount(text: string) {
   return positiveInteger(count) ? count : null;
 }
 
+export const handComponents = ['mao_coracao', 'mao_bolinha'] as const;
+export type HandType = typeof handComponents[number];
+export type HandRule = { type: HandType | null; ambiguous: boolean; label: string };
+
+/**
+ * Marcos's rule (23/11): the listing title tells the hands apart.
+ * "Kit 4 Bolinha" (singular) = Mão Grinch CORAÇÃO; "Kit com 4 bolinhas" (plural) = Mão Grinch BOLINHA.
+ * A title with both forms is ambiguous; a title with neither has no hand rule.
+ */
+export function handTypeFromTitle(title: string | null | undefined): HandRule {
+  const t = fold(title ?? '');
+  const singular = /\bbolinha\b/.test(t), plural = /\bbolinhas\b/.test(t);
+  if (singular && plural) return { type: null, ambiguous: true, label: 'título com "bolinha" e "bolinhas": ambíguo' };
+  if (singular) return { type: 'mao_coracao', ambiguous: false, label: '"bolinha" no singular → mão coração' };
+  if (plural) return { type: 'mao_bolinha', ambiguous: false, label: '"bolinhas" no plural → mão bolinha' };
+  return { type: null, ambiguous: false, label: 'sem regra de mão no título' };
+}
+
 export function guessFromText(name: string, attr: string | null): Parts | null {
   const variant = fold(attr ?? ''), listing = fold(name);
+  const hand = handTypeFromTitle(name);
+  // Units always come from the variation ("6 unidades"), never from the "Kit 4" in the title.
+  const units = unitCount(variant);
+  if (hand.ambiguous) return null;
+  if (hand.type) return units ? { [hand.type]: units } : null;
   for (const text of [variant, listing]) {
-    if (/\bcoracao\b/.test(text)) return { mao_coracao: unitCount(variant) ?? 1 };
     if (/\bmisto\b/.test(text)) return { biscoito: 2, elfo: 2 };
     if (/\b4\s*bisc(?:oit|ot)/.test(text)) return { biscoito: 4 };
     if (/\b4\s*elfo/.test(text)) return { elfo: 4 };
-    const count = unitCount(variant) ?? unitCount(listing);
-    if (count && /\bbolinhas?\b/.test(text)) return { mao_bolinha: count };
   }
   return null;
 }
 
 type Resolution =
-  | { kind: 'mapped'; entry: Variant; parts: Parts; expectedNames: number; confirmed: boolean; attrChanged: boolean }
+  | { kind: 'mapped'; entry: Variant; parts: Parts; expectedNames: number; confirmed: boolean; attrChanged: boolean; hand: HandRule | null; titleMismatch: boolean }
   | { kind: 'unmapped_christmas'; guess: Parts | null; reason?: string }
   | { kind: 'other' };
 
@@ -73,7 +94,12 @@ export function resolveItem(item: QueueOrder['items'][number], map: ComponentMap
   if (entry && entry.productId === item.productId) {
     const parts = Object.fromEntries(Object.entries(entry.componentes).map(([id, count]) => [id, count * item.quantity]));
     const expectedNames = Object.entries(parts).reduce((total, [id, count]) => total + (map.componentes[id]!.personalizado ? count : 0), 0);
-    return { kind: 'mapped', entry, parts, expectedNames, confirmed: entry.confirmado, attrChanged: attr !== fold(entry.variante) };
+    // Re-check hand entries against the CURRENT listing title on every read, so a renamed listing
+    // (or a map edited by hand) can never silently count the wrong hand.
+    const mappedHands = handComponents.filter(h => Object.hasOwn(entry.componentes, h));
+    const hand = mappedHands.length ? handTypeFromTitle(item.productName) : null;
+    const titleMismatch = !!hand && (mappedHands.length !== 1 || hand.type !== mappedHands[0]);
+    return { kind: 'mapped', entry, parts, expectedNames, confirmed: entry.confirmado, attrChanged: attr !== fold(entry.variante), hand, titleMismatch };
   }
   if (entry) {
     return { kind: 'unmapped_christmas', guess: guessFromText(item.productName, item.productAttr), reason: 'productId diferente do mapa' };

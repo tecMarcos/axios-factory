@@ -1,5 +1,5 @@
 {
-  "versao": 1,
+  "versao": 2,
   "atualizadoEm": "2026-11-23",
   "descricao": "Mapa de componentes da Central de Produção (Fatia 1). Chave = variationId do UpSeller; o productId também é conferido. componentes = peças por 1 unidade do item do pedido (productCount). Nomes esperados = soma das peças com personalizado=true × quantidade. Só produtos natalinos. confirmado=false: falta o Marcos confirmar.",
   "componentes": {
@@ -32,88 +32,88 @@
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "6 unidades",
       "componentes": {
-        "mao_bolinha": 6
+        "mao_coracao": 6
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (3 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"6 unidades\" = 6 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (3 linhas de pedido)"
     },
     "169722306430": {
       "productId": "22599159010",
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "2 unidades",
       "componentes": {
-        "mao_bolinha": 2
+        "mao_coracao": 2
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (5 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"2 unidades\" = 2 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (5 linhas de pedido)"
     },
     "169722306432": {
       "productId": "22599159010",
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "4 unidades",
       "componentes": {
-        "mao_bolinha": 4
+        "mao_coracao": 4
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (6 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"4 unidades\" = 4 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (6 linhas de pedido)"
     },
     "189190125082": {
       "productId": "23897993661",
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "2un",
       "componentes": {
-        "mao_bolinha": 2
+        "mao_coracao": 2
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (33 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"2un\" = 2 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (34 linhas de pedido)"
     },
     "199611882718": {
       "productId": "23897993661",
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "5un",
       "componentes": {
-        "mao_bolinha": 5
+        "mao_coracao": 5
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (37 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"5un\" = 5 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (37 linhas de pedido)"
     },
     "199611882717": {
       "productId": "23897993661",
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "4un",
       "componentes": {
-        "mao_bolinha": 4
+        "mao_coracao": 4
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (47 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"4un\" = 4 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (49 linhas de pedido)"
     },
     "189190125081": {
       "productId": "23897993661",
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "3un",
       "componentes": {
-        "mao_bolinha": 3
+        "mao_coracao": 3
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (36 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"3un\" = 3 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (38 linhas de pedido)"
     },
     "169722306431": {
       "productId": "22599159010",
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "3 unidades",
       "componentes": {
-        "mao_bolinha": 3
+        "mao_coracao": 3
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (4 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"3 unidades\" = 3 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (4 linhas de pedido)"
     },
     "189614321428": {
       "productId": "22799154331",
@@ -122,9 +122,9 @@
       "componentes": {
         "mao_bolinha": 4
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (14 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit com 4 bolinhas\" (plural) = Mão Grinch bolinha; unidades pela variação (\"4 unidades\" = 4 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (14 linhas de pedido)"
     },
     "199180134222": {
       "productId": "22093534214",
@@ -133,9 +133,9 @@
       "componentes": {
         "mao_bolinha": 5
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (4 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit com 4 bolinhas\" (plural) = Mão Grinch bolinha; unidades pela variação (\"5un\" = 5 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (5 linhas de pedido)"
     },
     "209196816816": {
       "productId": "22093534214",
@@ -144,9 +144,9 @@
       "componentes": {
         "mao_bolinha": 2
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (2 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit com 4 bolinhas\" (plural) = Mão Grinch bolinha; unidades pela variação (\"2un\" = 2 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (2 linhas de pedido)"
     },
     "199180134221": {
       "productId": "22093534214",
@@ -155,9 +155,9 @@
       "componentes": {
         "mao_bolinha": 4
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (17 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit com 4 bolinhas\" (plural) = Mão Grinch bolinha; unidades pela variação (\"4un\" = 4 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (17 linhas de pedido)"
     },
     "189614321426": {
       "productId": "22799154331",
@@ -166,9 +166,9 @@
       "componentes": {
         "mao_bolinha": 5
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (2 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit com 4 bolinhas\" (plural) = Mão Grinch bolinha; unidades pela variação (\"5 unidades\" = 5 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (2 linhas de pedido)"
     },
     "189614321427": {
       "productId": "22799154331",
@@ -177,9 +177,9 @@
       "componentes": {
         "mao_bolinha": 6
       },
-      "confirmado": false,
-      "pendencia": "Anúncio de bolinha: confirmar se é Mão Grinch bolinha (nenhum anúncio de coração foi visto) e se cada unidade leva 1 nome.",
-      "fonte": "snapshots VPS (3 linhas de pedido)"
+      "confirmado": true,
+      "regra": "Título \"Kit com 4 bolinhas\" (plural) = Mão Grinch bolinha; unidades pela variação (\"6 unidades\" = 6 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
+      "fonte": "snapshots VPS até 23/11 15:20 (3 linhas de pedido)"
     },
     "209614224298": {
       "productId": "58250409007",
@@ -189,7 +189,8 @@
         "biscoito": 4
       },
       "confirmado": true,
-      "fonte": "snapshots VPS (4 linhas de pedido)"
+      "regra": "Kit 4 biscoitos, sem nomes (Marcos, t57u).",
+      "fonte": "snapshots VPS até 23/11 15:20 (4 linhas de pedido)"
     },
     "239429290387": {
       "productId": "23298938170",
@@ -199,7 +200,8 @@
         "biscoito": 4
       },
       "confirmado": true,
-      "fonte": "snapshots VPS (50 linhas de pedido)"
+      "regra": "Kit 4 biscoitos, sem nomes (Marcos, t57u).",
+      "fonte": "snapshots VPS até 23/11 15:20 (52 linhas de pedido)"
     },
     "239429290388": {
       "productId": "23298938170",
@@ -210,7 +212,8 @@
         "elfo": 2
       },
       "confirmado": true,
-      "fonte": "snapshots VPS (74 linhas de pedido)"
+      "regra": "Kit misto = 2 biscoitos + 2 elfos, sem nomes (Marcos, t57u).",
+      "fonte": "snapshots VPS até 23/11 15:20 (79 linhas de pedido)"
     },
     "239429290386": {
       "productId": "23298938170",
@@ -220,7 +223,8 @@
         "elfo": 4
       },
       "confirmado": true,
-      "fonte": "snapshots VPS (5 linhas de pedido)"
+      "regra": "Kit 4 elfos, sem nomes (Marcos, t57u).",
+      "fonte": "snapshots VPS até 23/11 15:20 (5 linhas de pedido)"
     },
     "209614224299": {
       "productId": "58250409007",
@@ -231,7 +235,8 @@
         "elfo": 2
       },
       "confirmado": true,
-      "fonte": "snapshots VPS (3 linhas de pedido)"
+      "regra": "Kit misto = 2 biscoitos + 2 elfos, sem nomes (Marcos, t57u).",
+      "fonte": "snapshots VPS até 23/11 15:20 (3 linhas de pedido)"
     },
     "209614224297": {
       "productId": "58250409007",
@@ -241,7 +246,9 @@
         "elfo": 4
       },
       "confirmado": true,
-      "fonte": "snapshots VPS (1 linhas de pedido)"
+      "regra": "Kit 4 elfos, sem nomes (Marcos, t57u).",
+      "fonte": "snapshots VPS até 23/11 15:20 (1 linhas de pedido)"
     }
-  }
+  },
+  "regraMaos": "Kit 4 Bolinha (singular) = Mão Grinch coração; Kit com 4 bolinhas (plural) = Mão Grinch bolinha. Título com as duas formas = ambíguo (revisar). Unidades sempre pela variação. Conferido em toda leitura contra o título atual do anúncio."
 }

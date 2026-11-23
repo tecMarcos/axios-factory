@@ -29,7 +29,7 @@ const map = validateComponentMap({
 function order(id: string, variant: keyof typeof variants, quantity: number, note: string | null, hours = 72) {
   return { ...normalize({
     orderNumber: id, orderComment: note, orderTimeoutTime: (now + hours * 3600000) / 1000,
-    orderItemList: [{ productId: 'p1', variationId: variant, productName: 'Kit Bolinha Natal', productAttr: variants[variant][0], productCount: quantity }],
+    orderItemList: [{ productId: 'p1', variationId: variant, productName: 'Kit com 4 bolinhas Natal', productAttr: variants[variant][0], productCount: quantity }],
   }), queues: ['TO_SHIP'] as ('TO_SHIP' | 'TO_PRINT' | 'TO_PICKUP')[] };
 }
 const view = (...orders: ReturnType<typeof order>[]) => buildProductionView(buildProductionQueue(orders, now), map, now);
@@ -94,8 +94,10 @@ test('checks both IDs and flags changed attributes after folding', () => {
   }
   assert.equal(resolveItem({ ...item, productId: 'p2' }, map).kind, 'unmapped_christmas');
   assert.deepEqual(guessFromText('Kit Bolinhas', '5 un'), { mao_bolinha: 5 });
-  assert.deepEqual(guessFromText('Enfeite Coração', '3un'), { mao_coracao: 3 });
-  assert.deepEqual(guessFromText('Enfeite Coração', null), { mao_coracao: 1 });
+  // Hands are told apart only by "bolinha" (singular = coração) vs "bolinhas" (plural); units only from the variation.
+  assert.deepEqual(guessFromText('Kit 4 Bolinha de Natal', '3un'), { mao_coracao: 3 });
+  assert.equal(guessFromText('Kit 4 Bolinha de Natal', null), null);
+  assert.equal(guessFromText('Enfeite Coração', '3un'), null);
   assert.deepEqual(guessFromText('Kit 4 biscoto', null), { biscoito: 4 });
   assert.deepEqual(guessFromText('Kit 4 Biscoitos', 'Kit 4 Elfos'), { elfo: 4 });
   assert.deepEqual(guessFromText('Kit Natal', 'Misto'), { biscoito: 2, elfo: 2 });
