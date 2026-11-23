@@ -2,12 +2,13 @@ import { defaultTimezone, validateTimezone, operationalSummary } from './operati
 import { openSession } from './session.js';
 import { collectOrders, CollectorError, finalize, parseResponse, profiles, type AccountCollection, type Contract } from './core.js';
 import { parseAccounts, type AccountStatus } from './accounts.js';
+import { parseSessionSeeds, persistHealthRun } from './health.js';
 import { save } from './output.js';
 import { validScanSecret } from './scan-keys.js';
 function log(event: string, fields: Record<string, string | number> = {}) {
   process.stderr.write(JSON.stringify({ time: new Date().toISOString(), event, ...fields }) + '\n');
 }
-async function main() {
+async function main(statuses: AccountStatus[], dir: string) {
   // Never log arbitrary exceptions: browser errors can contain endpoints/credentials.
   const contract: Contract = { ordersPath: 'data.list', totalPath: 'data.total', successPath: 'code', successValue: 0 };
   const maxPages = Number(process.env.MAX_PAGES ?? 1000);
@@ -18,7 +19,8 @@ async function main() {
   const topN = Number(process.env.OPERATIONAL_TOP_N ?? 10);
   if (!Number.isSafeInteger(topN) || topN < 0) throw new CollectorError('INVALID_CONFIGURATION');
   const accounts = parseAccounts();
-  const parts: AccountCollection[] = [], statuses: AccountStatus[] = [];
+  configuredNames = accounts.map(account => account.name);
+  const parts: AccountCollection[] = [];
   // Accounts run one after the other, each in its own private profile. One account failing
   // (e.g. its login expired) must not hide the orders of the others.
   for (const account of accounts) {
@@ -36,7 +38,6 @@ async function main() {
   if (!parts.length) throw new CollectorError(statuses[0]?.error ?? 'RUNTIME_FAILURE');
   const result = finalize(parts, Date.now(), accounts.length > 1 ? statuses : undefined, account => log('duplicate_order_skipped', { account: account ?? '' }));
   {
-    const dir = process.env.OUTPUT_DIR ?? 'data';
     for (const order of result.orders) if (order.deadlineWarning) log('deadline_warning', { code: order.deadlineWarning });
     await save(result, dir);
     console.log(operationalSummary(result.productionSummary, timezone, topN));
@@ -74,8 +75,18 @@ async function collectAccount(profileDir: string, contract: Contract, maxPages: 
     }, maxPages);
   } finally { await context.close(); }
 }
-main().catch(error => {
-  log('collection_failed', { code: error instanceof CollectorError ? error.code : 'RUNTIME_FAILURE' });
+const statuses: AccountStatus[] = [];
+const dir = process.env.OUTPUT_DIR ?? 'data';
+let configuredNames: string[] | undefined;
+let runError: string | null = null;
+try {
+  await main(statuses, dir);
+} catch (error) {
+  runError = error instanceof CollectorError ? error.code : 'RUNTIME_FAILURE';
+  log('collection_failed', { code: runError });
   if (error instanceof CollectorError && error.code === 'AUTH_REQUIRED') console.error('AUTH_REQUIRED: execute npm run login -- <conta> para autenticar manualmente.');
   process.exitCode = 1;
-});
+} finally {
+  await persistHealthRun(dir, { at: Date.now(), statuses, runError }, parseSessionSeeds(process.env.UPSELLER_SESSION_SINCE),
+    code => log('health_write_failed', { code }), configuredNames);
+}

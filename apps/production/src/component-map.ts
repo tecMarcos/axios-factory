@@ -8,7 +8,7 @@ type Variant = {
 };
 export type ComponentMap = {
   versao: number;
-  componentes: Record<string, { nome: string; personalizado: boolean }>;
+  componentes: Record<string, { nome: string; personalizado: boolean; consumivel?: boolean }>;
   deteccaoNatal: string[];
   variantes: Record<string, Variant>;
 };
@@ -21,9 +21,12 @@ const invalid = (): never => { throw new Error('COMPONENT_MAP_INVALID'); };
 export function validateComponentMap(json: unknown): ComponentMap {
   if (!record(json) || !positiveInteger(json.versao) || !record(json.componentes) || !record(json.variantes)
     || !Array.isArray(json.deteccaoNatal) || !json.deteccaoNatal.every(k => nonblank(k) && fold(k))) return invalid();
+  const map = json as ComponentMap;
   const components = json.componentes;
   for (const [id, component] of Object.entries(components)) {
-    if (!nonblank(id) || !record(component) || !nonblank(component.nome) || typeof component.personalizado !== 'boolean') return invalid();
+    if (!nonblank(id) || !record(component) || !nonblank(component.nome) || typeof component.personalizado !== 'boolean'
+      || (component.consumivel !== undefined && typeof component.consumivel !== 'boolean')
+      || (component.consumivel === true && component.personalizado)) return invalid();
   }
   for (const [id, variant] of Object.entries(json.variantes)) {
     if (!nonblank(id) || !record(variant) || !nonblank(variant.productId) || !nonblank(variant.anuncio)
@@ -33,9 +36,16 @@ export function validateComponentMap(json: unknown): ComponentMap {
       || (variant.regra !== undefined && typeof variant.regra !== 'string')) return invalid();
     const parts = Object.entries(variant.componentes);
     if (!parts.length || parts.some(([part, count]) => !Object.hasOwn(components, part) || !positiveInteger(count))) return invalid();
+    if (Object.hasOwn(components, 'cordao_vermelho')) {
+      const printed = parts.reduce((sum, [part, count]) => sum + (isConsumable(map, part) ? 0 : Number(count)), 0);
+      if (!Object.hasOwn(variant.componentes, 'cordao_vermelho') || variant.componentes.cordao_vermelho !== printed) return invalid();
+    }
   }
-  return json as ComponentMap;
+  return map;
 }
+
+export const isConsumable = (map: ComponentMap, id: string) =>
+  Object.hasOwn(map.componentes, id) && map.componentes[id]!.consumivel === true;
 
 export const defaultComponentMapPath = new URL('../../../config/central-producao/componentes.json', import.meta.url);
 export function loadComponentMap(path = process.env.COMPONENT_MAP_PATH ?? defaultComponentMapPath) {
@@ -68,17 +78,19 @@ export function handTypeFromTitle(title: string | null | undefined): HandRule {
   return { type: null, ambiguous: false, label: 'sem regra de mão no título' };
 }
 
-export function guessFromText(name: string, attr: string | null): Parts | null {
+export function guessFromText(name: string, attr: string | null, map?: ComponentMap): Parts | null {
+  const withCord = (parts: Parts) => map && Object.hasOwn(map.componentes, 'cordao_vermelho')
+    ? { ...parts, cordao_vermelho: Object.values(parts).reduce((sum, count) => sum + count, 0) } : parts;
   const variant = fold(attr ?? ''), listing = fold(name);
   const hand = handTypeFromTitle(name);
   // Units always come from the variation ("6 unidades"), never from the "Kit 4" in the title.
   const units = unitCount(variant);
   if (hand.ambiguous) return null;
-  if (hand.type) return units ? { [hand.type]: units } : null;
+  if (hand.type) return units ? withCord({ [hand.type]: units }) : null;
   for (const text of [variant, listing]) {
-    if (/\bmisto\b/.test(text)) return { biscoito: 2, elfo: 2 };
-    if (/\b4\s*bisc(?:oit|ot)/.test(text)) return { biscoito: 4 };
-    if (/\b4\s*elfo/.test(text)) return { elfo: 4 };
+    if (/\bmisto\b/.test(text)) return withCord({ biscoito: 2, elfo: 2 });
+    if (/\b4\s*bisc(?:oit|ot)/.test(text)) return withCord({ biscoito: 4 });
+    if (/\b4\s*elfo/.test(text)) return withCord({ elfo: 4 });
   }
   return null;
 }
@@ -102,7 +114,7 @@ export function resolveItem(item: QueueOrder['items'][number], map: ComponentMap
     return { kind: 'mapped', entry, parts, expectedNames, confirmed: entry.confirmado, attrChanged: attr !== fold(entry.variante), hand, titleMismatch };
   }
   if (entry) {
-    return { kind: 'unmapped_christmas', guess: guessFromText(item.productName, item.productAttr), reason: 'productId diferente do mapa' };
+    return { kind: 'unmapped_christmas', guess: guessFromText(item.productName, item.productAttr, map), reason: 'productId diferente do mapa' };
   }
   const name = fold(item.productName);
   if (map.deteccaoNatal.some(keyword => {
@@ -110,7 +122,7 @@ export function resolveItem(item: QueueOrder['items'][number], map: ComponentMap
     const pattern = new RegExp(`\\b${literal}s?\\b`);
     return pattern.test(name) || pattern.test(attr);
   })) {
-    return { kind: 'unmapped_christmas', guess: guessFromText(item.productName, item.productAttr) };
+    return { kind: 'unmapped_christmas', guess: guessFromText(item.productName, item.productAttr, map) };
   }
   return { kind: 'other' };
 }

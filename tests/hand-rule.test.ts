@@ -85,7 +85,7 @@ test('regra das mãos: o mapa real segue a regra e está confirmado', () => {
   for (const v of hands) {
     const type = handTypeFromTitle(v.anuncio).type;
     assert.ok(type && v.componentes[type], `${v.anuncio} / ${v.variante}`);
-    assert.equal(Object.keys(v.componentes).length, 1);
+    assert.equal(Object.keys(v.componentes).length, 2);
     const units = Number(/(\d+)\s*un/i.exec(v.variante)?.[1]);
     assert.equal(v.componentes[type], units, v.variante);
     assert.equal(v.confirmado, true);

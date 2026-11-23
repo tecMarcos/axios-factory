@@ -2,13 +2,15 @@ import { priorities, type Priority } from '../../collector/src/operational.js';
 import type { Queue } from '../../collector/src/notifications.js';
 import { cleanText, defaultPersonalizationKeywords, displayOrderId, formatRemaining, groupByPriority, marketplaceUrl, personalizationStatus, platformLabel, priorityLabels, stageLabel, type LiveOrder } from '../../collector/src/orders-view.js';
 
-export type RenderOptions = { now: number; timezone: string; nonce: string; personalizationKeywords?: string[]; refreshSeconds?: number; scanHref?: string; productionHref?: string };
+export type RenderOptions = { now: number; timezone: string; nonce: string; personalizationKeywords?: string[]; refreshSeconds?: number; scanHref?: string; productionHref?: string; healthBar?: string };
 type CardOptions = { timezone: string; personalizationKeywords: string[]; large?: boolean };
 
 export const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 export const time = (epoch: number, timeZone: string) => new Intl.DateTimeFormat('pt-BR', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(epoch);
 const dateTime = (epoch: number, timeZone: string) => new Intl.DateTimeFormat('pt-BR', { timeZone, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(epoch);
 const openByDefault: Priority[] = ['OVERDUE', 'CRITICAL', 'URGENT', 'ATTENTION'];
+
+export const healthCss = '.monitor-line{margin:4px 0;padding:6px 10px;border-radius:6px;color:#6e1515;background:#ffe4e2;border-left:4px solid #c62828}.monitor-warning{color:#653400;background:#fff0d7;border-color:#bc6000}.monitor-ok{margin:6px 0;color:#145421;background:#e5f4e8;padding:5px 8px;border-radius:6px}';
 
 const css = `
 :root{--bg:#f4f4f1;--card:#fff;--ink:#1d1d1b;--muted:#6b6b66;--line:#e2e1dc;--late:#c62828;--crit:#e0533d;--urg:#e09a1f;--att:#c9b200;--ok:#3f8f4f;--note:#fff6d6;--noteline:#e8cf6a;--miss:#fde7e7;--shopee:#ee4d2d;--tiktok:#111;--good:#e5f4e8}
@@ -136,11 +138,12 @@ export function renderPanel(queue: Queue, options: RenderOptions): string {
   </details>`).join('');
   return shell({
     title: 'Pedidos', nonce: o.nonce, refreshSeconds: o.refreshSeconds,
+    extraHead: o.healthBar ? `<style nonce="${esc(o.nonce)}">${healthCss}</style>` : undefined,
     body: `
 <div class="top">
   <div class="titlebar"><h1>Pedidos para produzir</h1>${o.scanHref ? `<a class="btn" href="${esc(o.scanHref)}">📷 Bipar</a>` : ''}${o.productionHref ? `<a class="btn" href="${esc(o.productionHref)}">🧩 Produção</a>` : ''}</div>
   <div class="muted">${queue.orders.length} pedidos · atualizado às ${esc(time(generated, o.timezone))}${ageMin >= 90 ? ` · <span class="stale">dados de ${ageMin} min atrás</span>` : ageMin > 0 ? ` (há ${ageMin} min)` : ''}</div>
-  ${accountAlerts(queue)}
+  ${o.healthBar ? `${o.healthBar}\n  ` : ''}${accountAlerts(queue)}
   <nav class="chips">${missing ? `<a class="chip warn" href="#${esc(firstMissingSection(groups, o.personalizationKeywords))}">⚠️ Sem nome <b>${missing}</b></a>` : ''}${chips}</nav>
 </div>
 <main>

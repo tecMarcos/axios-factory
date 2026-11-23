@@ -1,10 +1,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFile, realpath } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultTimezone, validateTimezone } from '../../collector/src/operational.js';
-import { validateSnapshot } from '../../collector/src/notifications.js';
+import { readSnapshot } from '../../collector/src/snapshot.js';
+import { evaluateAlerts, healthConfigFromEnv, sessionAgeDays, type HealthConfig } from '../../collector/src/health-alerts.js';
+import { readHealth, type Health } from '../../collector/src/health.js';
+import { emptyNotifyHealth, readNotifyHealth, type NotifyHealth } from '../../collector/src/notify-health.js';
+import { renderHealth } from './render-health.js';
 import { parseKeywords } from '../../collector/src/orders-view.js';
 import { validScanSecret } from '../../collector/src/scan-keys.js';
 import { defaultComponentMapPath, loadComponentMap, type ComponentMap } from '../../production/src/component-map.js';
@@ -13,15 +17,12 @@ import { renderProduction } from './render-production.js';
 import { renderPanel } from './render.js';
 import { findOrders, renderScanPage, renderScanResult } from './scan.js';
 
-export type PanelConfig = { token: string; dataDir: string; timezone: string; keywords: string[]; scanSecret?: string; now?: () => number; scannerLibPath?: string; production?: { map: ComponentMap; historyLoader?: (dataDir: string) => Promise<History[]>; envLabel?: string } };
+type HealthReader<T> = (dir: string) => Promise<T | null> | T | null;
+const readMonitor = <T>(dir: string, read: HealthReader<T>) => Promise.resolve().then(() => read(dir)).catch(() => null);
 
-/** Read the collector's current atomic generation once, so a concurrent collection cannot mix files. */
-export async function loadSnapshot(dir: string) {
-  let snapshot: string;
-  try { snapshot = await realpath(join(dir, '.current')); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; snapshot = dir; }
-  const [queue, summary] = await Promise.all(['production-queue.json', 'production-summary.json'].map(async f => JSON.parse(await readFile(join(snapshot, f), 'utf8'))));
-  return validateSnapshot(queue, summary).queue;
-}
+export type PanelConfig = { token: string; dataDir: string; timezone: string; keywords: string[]; scanSecret?: string; now?: () => number; scannerLibPath?: string; health?: { config: Partial<HealthConfig>; readHealth?: HealthReader<Health>; readNotify?: HealthReader<NotifyHealth> }; production?: { map: ComponentMap; historyLoader?: (dataDir: string) => Promise<History[]>; envLabel?: string } };
+
+export async function loadSnapshot(dir: string) { return (await readSnapshot(dir)).queue; }
 
 export const defaultScannerLib = fileURLToPath(new URL('../../../node_modules/@zxing/library/umd/index.min.js', import.meta.url));
 
@@ -61,7 +62,7 @@ export function createPanelHandler(config: PanelConfig) {
     const base = `/p/${match[1]}`, sub = match[2] ?? '';
     const paths = { list: base, scan: `${base}/bipar`, lib: `${base}/leitor.js` };
     const allowed = sub === '/bipar' ? ['GET', 'HEAD', 'POST'] : ['GET', 'HEAD'];
-    if (!['', '/bipar', '/leitor.js'].includes(sub) && !(sub === '/producao' && config.production)) return send(res, 404, 'Não encontrado');
+    if (!['', '/bipar', '/leitor.js'].includes(sub) && !(sub === '/producao' && config.production) && !(sub === '/saude.json' && config.health)) return send(res, 404, 'Não encontrado');
     if (!allowed.includes(req.method ?? '')) return send(res, 405, 'Método não permitido', { Allow: allowed.join(', ') });
 
     if (sub === '/leitor.js') {
@@ -80,10 +81,28 @@ export function createPanelHandler(config: PanelConfig) {
       // Codes travel in the POST body so they never land in proxy access logs.
       try { scanned = (await readForm(req)).get('c')?.slice(0, 300) ?? ''; } catch { return send(res, 400, 'Pedido inválido'); }
     }
-    let queue;
-    try { queue = await loadSnapshot(config.dataDir); }
-    catch { console.error(JSON.stringify({ event: 'panel_snapshot_unavailable' })); return send(res, 503, 'Os dados dos pedidos ainda não estão disponíveis. Tente de novo em alguns minutos.', { 'Retry-After': '120' }); }
+    const queue = await loadSnapshot(config.dataDir).catch(() => null);
+    if (!queue && sub !== '/saude.json') {
+      console.error(JSON.stringify({ event: 'panel_snapshot_unavailable' }));
+      return send(res, 503, 'Os dados dos pedidos ainda não estão disponíveis. Tente de novo em alguns minutos.', { 'Retry-After': '120' });
+    }
     const t = now();
+    let healthBar: string | undefined;
+    if (config.health && scanned === undefined) {
+      const [health, notify] = await Promise.all([
+        readMonitor(config.dataDir, config.health.readHealth ?? readHealth),
+        readMonitor(config.dataDir, config.health.readNotify ?? readNotifyHealth),
+      ]);
+      const alerts = evaluateAlerts({ health, notify, queue, now: t, timezone: config.timezone, config: config.health.config });
+      if (sub === '/saude.json') return send(res, 200, JSON.stringify({
+        generatedAt: new Date(t).toISOString(), ok: alerts.length === 0, alerts,
+        accounts: health?.accounts.map(({ name, ok, error, lastSuccessAt, consecutiveFailures, sessionStartedAt }) =>
+          ({ name, ok, error, lastSuccessAt, consecutiveFailures, sessionAgeDays: sessionAgeDays(sessionStartedAt, t) })) ?? [],
+        notify: (notify ?? emptyNotifyHealth()).channels, lastRunAt: health?.lastRunAt ?? null,
+      }), { 'Content-Type': 'application/json; charset=utf-8' });
+      healthBar = renderHealth(alerts, health?.lastRunAt ?? null, config.timezone, sub === '/producao');
+    }
+    if (!queue) return send(res, 404, 'Não encontrado');
     if (scanned !== undefined) {
       const matches = findOrders(queue, scanned, config.scanSecret, t);
       console.log(JSON.stringify({ event: 'panel_scan', matched: matches.length }));
@@ -103,10 +122,10 @@ export function createPanelHandler(config: PanelConfig) {
       }
       return html(res, renderProduction(queue, map, history, {
         now: t, timezone: config.timezone, nonce, envLabel, listHref: base, refreshSeconds: 120,
-        historyUnavailable, nameFilter: req.method === 'GET' ? url.searchParams.get('nomes') : null,
+        historyUnavailable, healthBar, nameFilter: req.method === 'GET' ? url.searchParams.get('nomes') : null,
       }), nonce);
     }
-    return html(res, renderPanel(queue, { now: t, timezone: config.timezone, nonce, personalizationKeywords: config.keywords, scanHref: paths.scan, productionHref: config.production ? `${base}/producao` : undefined }), nonce);
+    return html(res, renderPanel(queue, { now: t, timezone: config.timezone, nonce, healthBar, personalizationKeywords: config.keywords, scanHref: paths.scan, productionHref: config.production ? `${base}/producao` : undefined }), nonce);
   };
 }
 
@@ -117,6 +136,7 @@ export function startPanel(env: NodeJS.ProcessEnv = process.env) {
     timezone: validateTimezone(env.BUSINESS_TIMEZONE ?? defaultTimezone),
     keywords: parseKeywords(env.PERSONALIZATION_KEYWORDS),
     scanSecret: validScanSecret(env.SCAN_KEY),
+    ...(env.HEALTH_MONITOR === '1' ? { health: { config: healthConfigFromEnv(env) } } : {}),
     ...(env.CENTRAL_PRODUCAO === '1' ? {
       production: { map: loadComponentMap(env.COMPONENT_MAP_PATH ?? defaultComponentMapPath), envLabel: env.PANEL_ENV_LABEL },
     } : {}),

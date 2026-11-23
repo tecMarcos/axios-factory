@@ -1,10 +1,10 @@
 import type { Queue } from '../../collector/src/notifications.js';
 import { cleanText, formatRemaining, platformLabel, stageLabel } from '../../collector/src/orders-view.js';
-import { handTypeFromTitle, type ComponentMap } from '../../production/src/component-map.js';
+import { handTypeFromTitle, isConsumable, type ComponentMap } from '../../production/src/component-map.js';
 import { nameStatuses } from '../../production/src/names.js';
 import { buildProductionView } from '../../production/src/production.js';
 import { computeSyncHealth, type History } from '../../production/src/sync-health.js';
-import { esc, shell, time } from './render.js';
+import { esc, healthCss, shell, time } from './render.js';
 
 const text = (value: string | null | undefined) => esc(cleanText(value));
 const labels = {
@@ -44,14 +44,17 @@ function syncSection(health: ReturnType<typeof computeSyncHealth>, timezone: str
   </section>`;
 }
 
-type Options = { now: number; timezone: string; nonce: string; envLabel?: string; listHref: string; refreshSeconds?: number; historyUnavailable?: boolean; nameFilter?: string | null };
+type Options = { now: number; timezone: string; nonce: string; envLabel?: string; listHref: string; refreshSeconds?: number; historyUnavailable?: boolean; nameFilter?: string | null; healthBar?: string };
 
 export function renderProduction(queue: Queue, map: ComponentMap, history: History[], o: Options) {
   const { orders, totals, nameCounts, unmapped } = buildProductionView(queue, map, o.now);
   const health = computeSyncHealth([...history, { generatedAt: queue.generatedAt, accounts: queue.accounts }], o.now);
   const componentName = (id: string) => text(Object.hasOwn(map.componentes, id) ? map.componentes[id]!.nome : id);
   const parts = (counts: Record<string, number>) => Object.entries(counts).map(([id, count]) => `${count}× ${componentName(id)}`).join(' + ');
-  const rows = Object.keys(map.componentes).map(id => `<tr><th scope="row">${componentName(id)}</th><td>${totals.aProduzir[id]}${totals.unconfirmedParts[id] ? ` <span class="muted">(${totals.unconfirmedParts[id]} a confirmar)</span>` : ''}</td><td>${totals.jaEmbalados[id]}</td></tr>`).join('');
+  const rows = (ids: string[]) => ids.map(id => `<tr><th scope="row">${componentName(id)}</th><td>${totals.aProduzir[id]}${totals.unconfirmedParts[id] ? ` <span class="muted">(${totals.unconfirmedParts[id]} a confirmar)</span>` : ''}</td><td>${totals.jaEmbalados[id]}</td></tr>`).join('');
+  const ids = Object.keys(map.componentes);
+  const printed = ids.filter(id => !isConsumable(map, id));
+  const consumables = ids.filter(id => isConsumable(map, id));
   const filter = nameStatuses.find(status => status === o.nameFilter);
   const chips = nameStatuses.map(status =>
     `<a class="chip" href="?nomes=${status}"${filter === status ? ' aria-current="true"' : ''}>${labels[status]} <b>${nameCounts[status]}</b></a>`
@@ -85,14 +88,14 @@ export function renderProduction(queue: Queue, map: ComponentMap, history: Histo
     ${v.reason ? ` · ${text(v.reason)}` : ''}${(h => h.type || h.ambiguous ? ` · ${esc(h.label)}` : '')(handTypeFromTitle(v.productName))}${v.guess ? ` · sugestão: ${parts(v.guess)}` : ''}</li>`).join('');
   return shell({
     title: 'Produção', nonce: o.nonce, noScript: true, refreshSeconds: o.refreshSeconds,
-    extraHead: `<style nonce="${esc(o.nonce)}">${css}</style>`,
+    extraHead: `<style nonce="${esc(o.nonce)}">${css}${o.healthBar ? healthCss : ''}</style>`,
     body: `<main class="production">
       <div class="titlebar"><h1>Central de Produção</h1><a class="btn" href="${esc(o.listHref)}">Pedidos</a></div>
-      ${o.envLabel ? `<div class="banner">${text(o.envLabel)}</div>` : ''}
+      ${o.healthBar ? `${o.healthBar}\n      ` : ''}${o.envLabel ? `<div class="banner">${text(o.envLabel)}</div>` : ''}
       ${syncSection(health, o.timezone)}
       ${o.historyUnavailable ? '<p class="sync-stale">Histórico indisponível: falhas seguidas podem estar subestimadas</p>' : ''}
       <section><h2>Peças a produzir</h2>
-        <table><thead><tr><th scope="col">Peça</th><th scope="col">A produzir</th><th scope="col">Já embaladas</th></tr></thead><tbody>${rows}</tbody></table>
+        <table><thead><tr><th scope="col">Peça</th><th scope="col">A produzir</th><th scope="col">Já embaladas</th></tr></thead><tbody>${rows(printed)}</tbody>${consumables.length ? `<tbody><tr><th scope="rowgroup" colspan="3">Consumíveis (não impressos)</th></tr>${rows(consumables)}</tbody>` : ''}</table>
       </section>
       <section><h2>Nomes</h2><div class="chips">${filter ? '<a class="chip" href="?">Todos</a>' : ''}${chips}</div></section>
       <section><h2>Pedidos natalinos</h2>${cards || (filter ? '<p>Nenhum pedido com esse status de nomes.</p>' : '<p>Nenhum pedido natalino.</p>')}</section>

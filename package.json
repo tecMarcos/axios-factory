@@ -12,7 +12,8 @@
     "login": "node --env-file-if-exists=.env --import tsx apps/collector/src/login.ts",
     "notify:daily": "node --env-file-if-exists=.env --import tsx apps/collector/src/notify-cli.ts daily",
     "panel": "node --env-file-if-exists=.env --import tsx apps/panel/src/main.ts",
-    "notify:check": "node --env-file-if-exists=.env --import tsx apps/collector/src/notify-cli.ts check"
+    "notify:check": "node --env-file-if-exists=.env --import tsx apps/collector/src/notify-cli.ts check",
+    "health:alerts": "node --env-file-if-exists=.env --import tsx apps/collector/src/health-cli.ts"
   },
   "dependencies": {
     "@zxing/library": "0.23.0",

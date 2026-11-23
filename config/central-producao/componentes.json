@@ -1,23 +1,33 @@
 {
-  "versao": 2,
+  "versao": 3,
   "atualizadoEm": "2026-11-23",
-  "descricao": "Mapa de componentes da Central de Produção (Fatia 1). Chave = variationId do UpSeller; o productId também é conferido. componentes = peças por 1 unidade do item do pedido (productCount). Nomes esperados = soma das peças com personalizado=true × quantidade. Só produtos natalinos. confirmado=false: falta o Marcos confirmar.",
+  "descricao": "Mapa de componentes da Central de Produção (Fatia 1). Chave = variationId do UpSeller; o productId também é conferido. componentes = peças por 1 unidade do item do pedido (productCount). Nomes esperados = soma das peças com personalizado=true × quantidade. Só produtos natalinos. confirmado=false: falta o Marcos confirmar. Cada peça de Natal leva 1 cordão vermelho.",
   "componentes": {
     "mao_coracao": {
       "nome": "Mão Grinch coração",
-      "personalizado": true
+      "personalizado": true,
+      "consumivel": false
     },
     "mao_bolinha": {
       "nome": "Mão Grinch bolinha",
-      "personalizado": true
+      "personalizado": true,
+      "consumivel": false
     },
     "biscoito": {
       "nome": "Biscoito natalino",
-      "personalizado": false
+      "personalizado": false,
+      "consumivel": false
     },
     "elfo": {
       "nome": "Elfo natalino",
-      "personalizado": false
+      "personalizado": false,
+      "consumivel": false
+    },
+    "cordao_vermelho": {
+      "nome": "Cordão vermelho",
+      "personalizado": false,
+      "consumivel": true,
+      "observacao": "consumível: já cortado ou cortado do rolo; não é impresso"
     }
   },
   "deteccaoNatal": [
@@ -32,7 +42,8 @@
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "6 unidades",
       "componentes": {
-        "mao_coracao": 6
+        "mao_coracao": 6,
+        "cordao_vermelho": 6
       },
       "confirmado": true,
       "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"6 unidades\" = 6 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -43,7 +54,8 @@
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "2 unidades",
       "componentes": {
-        "mao_coracao": 2
+        "mao_coracao": 2,
+        "cordao_vermelho": 2
       },
       "confirmado": true,
       "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"2 unidades\" = 2 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -54,7 +66,8 @@
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "4 unidades",
       "componentes": {
-        "mao_coracao": 4
+        "mao_coracao": 4,
+        "cordao_vermelho": 4
       },
       "confirmado": true,
       "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"4 unidades\" = 4 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -65,7 +78,8 @@
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "2un",
       "componentes": {
-        "mao_coracao": 2
+        "mao_coracao": 2,
+        "cordao_vermelho": 2
       },
       "confirmado": true,
       "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"2un\" = 2 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -76,7 +90,8 @@
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "5un",
       "componentes": {
-        "mao_coracao": 5
+        "mao_coracao": 5,
+        "cordao_vermelho": 5
       },
       "confirmado": true,
       "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"5un\" = 5 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -87,7 +102,8 @@
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "4un",
       "componentes": {
-        "mao_coracao": 4
+        "mao_coracao": 4,
+        "cordao_vermelho": 4
       },
       "confirmado": true,
       "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"4un\" = 4 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -98,7 +114,8 @@
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "3un",
       "componentes": {
-        "mao_coracao": 3
+        "mao_coracao": 3,
+        "cordao_vermelho": 3
       },
       "confirmado": true,
       "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"3un\" = 3 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -109,7 +126,8 @@
       "anuncio": "Kit 4 Bolinha de Natal Grinch",
       "variante": "3 unidades",
       "componentes": {
-        "mao_coracao": 3
+        "mao_coracao": 3,
+        "cordao_vermelho": 3
       },
       "confirmado": true,
       "regra": "Título \"Kit 4 Bolinha\" (singular) = Mão Grinch coração; unidades pela variação (\"3 unidades\" = 3 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -120,7 +138,8 @@
       "anuncio": "Kit com 4 bolinhas Natal Grinch",
       "variante": "4 unidades",
       "componentes": {
-        "mao_bolinha": 4
+        "mao_bolinha": 4,
+        "cordao_vermelho": 4
       },
       "confirmado": true,
       "regra": "Título \"Kit com 4 bolinhas\" (plural) = Mão Grinch bolinha; unidades pela variação (\"4 unidades\" = 4 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -131,7 +150,8 @@
       "anuncio": "Kit com 4 bolinhas Natal Grinch",
       "variante": "5un",
       "componentes": {
-        "mao_bolinha": 5
+        "mao_bolinha": 5,
+        "cordao_vermelho": 5
       },
       "confirmado": true,
       "regra": "Título \"Kit com 4 bolinhas\" (plural) = Mão Grinch bolinha; unidades pela variação (\"5un\" = 5 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -142,7 +162,8 @@
       "anuncio": "Kit com 4 bolinhas Natal Grinch",
       "variante": "2un",
       "componentes": {
-        "mao_bolinha": 2
+        "mao_bolinha": 2,
+        "cordao_vermelho": 2
       },
       "confirmado": true,
       "regra": "Título \"Kit com 4 bolinhas\" (plural) = Mão Grinch bolinha; unidades pela variação (\"2un\" = 2 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -153,7 +174,8 @@
       "anuncio": "Kit com 4 bolinhas Natal Grinch",
       "variante": "4un",
       "componentes": {
-        "mao_bolinha": 4
+        "mao_bolinha": 4,
+        "cordao_vermelho": 4
       },
       "confirmado": true,
       "regra": "Título \"Kit com 4 bolinhas\" (plural) = Mão Grinch bolinha; unidades pela variação (\"4un\" = 4 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -164,7 +186,8 @@
       "anuncio": "Kit com 4 bolinhas Natal Grinch",
       "variante": "5 unidades",
       "componentes": {
-        "mao_bolinha": 5
+        "mao_bolinha": 5,
+        "cordao_vermelho": 5
       },
       "confirmado": true,
       "regra": "Título \"Kit com 4 bolinhas\" (plural) = Mão Grinch bolinha; unidades pela variação (\"5 unidades\" = 5 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -175,7 +198,8 @@
       "anuncio": "Kit com 4 bolinhas Natal Grinch",
       "variante": "6 unidades",
       "componentes": {
-        "mao_bolinha": 6
+        "mao_bolinha": 6,
+        "cordao_vermelho": 6
       },
       "confirmado": true,
       "regra": "Título \"Kit com 4 bolinhas\" (plural) = Mão Grinch bolinha; unidades pela variação (\"6 unidades\" = 6 mãos), nunca pelo \"Kit 4\" do título; 1 nome por mão. Regra do Marcos, 23/11.",
@@ -186,7 +210,8 @@
       "anuncio": "Kit enfeite de natal Biscoito Ginger, Elfo",
       "variante": "Kit 4 Biscoitos",
       "componentes": {
-        "biscoito": 4
+        "biscoito": 4,
+        "cordao_vermelho": 4
       },
       "confirmado": true,
       "regra": "Kit 4 biscoitos, sem nomes (Marcos, t57u).",
@@ -197,7 +222,8 @@
       "anuncio": "Kit enfeite de natal Biscoito Ginger, Elfo",
       "variante": "Kit 4 Biscoitos Ginger",
       "componentes": {
-        "biscoito": 4
+        "biscoito": 4,
+        "cordao_vermelho": 4
       },
       "confirmado": true,
       "regra": "Kit 4 biscoitos, sem nomes (Marcos, t57u).",
@@ -209,7 +235,8 @@
       "variante": "Kit Misto- 2 Elfos + 2 biscoto",
       "componentes": {
         "biscoito": 2,
-        "elfo": 2
+        "elfo": 2,
+        "cordao_vermelho": 4
       },
       "confirmado": true,
       "regra": "Kit misto = 2 biscoitos + 2 elfos, sem nomes (Marcos, t57u).",
@@ -220,7 +247,8 @@
       "anuncio": "Kit enfeite de natal Biscoito Ginger, Elfo",
       "variante": "Kit 4 Elfos",
       "componentes": {
-        "elfo": 4
+        "elfo": 4,
+        "cordao_vermelho": 4
       },
       "confirmado": true,
       "regra": "Kit 4 elfos, sem nomes (Marcos, t57u).",
@@ -232,7 +260,8 @@
       "variante": "Kit Misto (2Biscoitos+2 Elfos)",
       "componentes": {
         "biscoito": 2,
-        "elfo": 2
+        "elfo": 2,
+        "cordao_vermelho": 4
       },
       "confirmado": true,
       "regra": "Kit misto = 2 biscoitos + 2 elfos, sem nomes (Marcos, t57u).",
@@ -243,12 +272,14 @@
       "anuncio": "Kit enfeite de natal Biscoito Ginger, Elfo",
       "variante": "Kit 4 Elfos",
       "componentes": {
-        "elfo": 4
+        "elfo": 4,
+        "cordao_vermelho": 4
       },
       "confirmado": true,
       "regra": "Kit 4 elfos, sem nomes (Marcos, t57u).",
       "fonte": "snapshots VPS até 23/11 15:20 (1 linhas de pedido)"
     }
   },
-  "regraMaos": "Kit 4 Bolinha (singular) = Mão Grinch coração; Kit com 4 bolinhas (plural) = Mão Grinch bolinha. Título com as duas formas = ambíguo (revisar). Unidades sempre pela variação. Conferido em toda leitura contra o título atual do anúncio."
+  "regraMaos": "Kit 4 Bolinha (singular) = Mão Grinch coração; Kit com 4 bolinhas (plural) = Mão Grinch bolinha. Título com as duas formas = ambíguo (revisar). Unidades sempre pela variação. Conferido em toda leitura contra o título atual do anúncio.",
+  "regraCordao": "1 cordão vermelho por peça de Natal (mão coração, mão bolinha, biscoito, elfo). Regra do Marcos, 23/11."
 }
