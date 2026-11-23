@@ -7,10 +7,13 @@ import { defaultTimezone, validateTimezone } from '../../collector/src/operation
 import { validateSnapshot } from '../../collector/src/notifications.js';
 import { parseKeywords } from '../../collector/src/orders-view.js';
 import { validScanSecret } from '../../collector/src/scan-keys.js';
+import { defaultComponentMapPath, loadComponentMap, type ComponentMap } from '../../production/src/component-map.js';
+import { loadSyncHistory, type History } from '../../production/src/sync-health.js';
+import { renderProduction } from './render-production.js';
 import { renderPanel } from './render.js';
 import { findOrders, renderScanPage, renderScanResult } from './scan.js';
 
-export type PanelConfig = { token: string; dataDir: string; timezone: string; keywords: string[]; scanSecret?: string; now?: () => number; scannerLibPath?: string };
+export type PanelConfig = { token: string; dataDir: string; timezone: string; keywords: string[]; scanSecret?: string; now?: () => number; scannerLibPath?: string; production?: { map: ComponentMap; historyLoader?: (dataDir: string) => Promise<History[]>; envLabel?: string } };
 
 /** Read the collector's current atomic generation once, so a concurrent collection cannot mix files. */
 export async function loadSnapshot(dir: string) {
@@ -49,7 +52,8 @@ export function createPanelHandler(config: PanelConfig) {
   const libPath = config.scannerLibPath ?? defaultScannerLib;
   let lib: Promise<Buffer | null> | undefined;
   return async (req: IncomingMessage, res: ServerResponse) => {
-    const path = new URL(req.url ?? '/', 'http://panel').pathname;
+    const url = new URL(req.url ?? '/', 'http://panel');
+    const path = url.pathname;
     if (path === '/healthz') return send(res, 200, 'ok');
     const match = /^\/p\/([^/]+)(\/[a-z.]*)?\/?$/.exec(path);
     // Constant-time comparison; any wrong or missing token looks exactly like an unknown page.
@@ -57,7 +61,7 @@ export function createPanelHandler(config: PanelConfig) {
     const base = `/p/${match[1]}`, sub = match[2] ?? '';
     const paths = { list: base, scan: `${base}/bipar`, lib: `${base}/leitor.js` };
     const allowed = sub === '/bipar' ? ['GET', 'HEAD', 'POST'] : ['GET', 'HEAD'];
-    if (!['', '/bipar', '/leitor.js'].includes(sub)) return send(res, 404, 'Não encontrado');
+    if (!['', '/bipar', '/leitor.js'].includes(sub) && !(sub === '/producao' && config.production)) return send(res, 404, 'Não encontrado');
     if (!allowed.includes(req.method ?? '')) return send(res, 405, 'Método não permitido', { Allow: allowed.join(', ') });
 
     if (sub === '/leitor.js') {
@@ -67,7 +71,7 @@ export function createPanelHandler(config: PanelConfig) {
     }
     const nonce = randomBytes(16).toString('base64');
     if (sub === '/bipar' && req.method !== 'POST') {
-      const auto = new URL(req.url ?? '/', 'http://panel').searchParams.get('auto') === '1';
+      const auto = url.searchParams.get('auto') === '1';
       return html(res, renderScanPage({ nonce, paths, auto }), nonce);
     }
 
@@ -85,7 +89,24 @@ export function createPanelHandler(config: PanelConfig) {
       console.log(JSON.stringify({ event: 'panel_scan', matched: matches.length }));
       return html(res, renderScanResult({ nonce, paths, scanned, matches, timezone: config.timezone, personalizationKeywords: config.keywords }), nonce);
     }
-    return html(res, renderPanel(queue, { now: t, timezone: config.timezone, nonce, personalizationKeywords: config.keywords, scanHref: paths.scan }), nonce);
+    if (sub === '/producao' && config.production) {
+      const { map, historyLoader = loadSyncHistory, envLabel } = config.production;
+      let history: History[] = [];
+      let historyUnavailable = false;
+      try { history = await historyLoader(config.dataDir); }
+      catch (error) {
+        historyUnavailable = true;
+        const details = error as { code?: unknown; name?: unknown } | null;
+        const code = [details?.code, details?.name].find(value =>
+          typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(value));
+        console.error(JSON.stringify({ event: 'production_history_unavailable', code: code ?? 'Error' }));
+      }
+      return html(res, renderProduction(queue, map, history, {
+        now: t, timezone: config.timezone, nonce, envLabel, listHref: base, refreshSeconds: 120,
+        historyUnavailable, nameFilter: req.method === 'GET' ? url.searchParams.get('nomes') : null,
+      }), nonce);
+    }
+    return html(res, renderPanel(queue, { now: t, timezone: config.timezone, nonce, personalizationKeywords: config.keywords, scanHref: paths.scan, productionHref: config.production ? `${base}/producao` : undefined }), nonce);
   };
 }
 
@@ -96,6 +117,9 @@ export function startPanel(env: NodeJS.ProcessEnv = process.env) {
     timezone: validateTimezone(env.BUSINESS_TIMEZONE ?? defaultTimezone),
     keywords: parseKeywords(env.PERSONALIZATION_KEYWORDS),
     scanSecret: validScanSecret(env.SCAN_KEY),
+    ...(env.CENTRAL_PRODUCAO === '1' ? {
+      production: { map: loadComponentMap(env.COMPONENT_MAP_PATH ?? defaultComponentMapPath), envLabel: env.PANEL_ENV_LABEL },
+    } : {}),
   });
   const port = Number(env.PANEL_PORT ?? 3100), host = env.PANEL_HOST ?? '127.0.0.1';
   if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error('PANEL_PORT_INVALID');

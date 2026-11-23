@@ -2,11 +2,11 @@ import { priorities, type Priority } from '../../collector/src/operational.js';
 import type { Queue } from '../../collector/src/notifications.js';
 import { cleanText, defaultPersonalizationKeywords, displayOrderId, formatRemaining, groupByPriority, marketplaceUrl, personalizationStatus, platformLabel, priorityLabels, stageLabel, type LiveOrder } from '../../collector/src/orders-view.js';
 
-export type RenderOptions = { now: number; timezone: string; nonce: string; personalizationKeywords?: string[]; refreshSeconds?: number; scanHref?: string };
+export type RenderOptions = { now: number; timezone: string; nonce: string; personalizationKeywords?: string[]; refreshSeconds?: number; scanHref?: string; productionHref?: string };
 type CardOptions = { timezone: string; personalizationKeywords: string[]; large?: boolean };
 
 export const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
-const time = (epoch: number, timeZone: string) => new Intl.DateTimeFormat('pt-BR', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(epoch);
+export const time = (epoch: number, timeZone: string) => new Intl.DateTimeFormat('pt-BR', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(epoch);
 const dateTime = (epoch: number, timeZone: string) => new Intl.DateTimeFormat('pt-BR', { timeZone, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(epoch);
 const openByDefault: Priority[] = ['OVERDUE', 'CRITICAL', 'URGENT', 'ATTENTION'];
 
@@ -65,7 +65,7 @@ document.addEventListener('change', function (e) {
   var s = document.getElementById('checked'); if (s) s.textContent = ok.length === all.length ? '✅ Tudo conferido' : ok.length + ' de ' + all.length + ' conferidos';
 });`;
 
-export function shell(o: { title: string; nonce: string; body: string; script?: string; refreshSeconds?: number; extraHead?: string }) {
+export function shell(o: { title: string; nonce: string; body: string; script?: string; refreshSeconds?: number; extraHead?: string; noScript?: boolean }) {
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -80,7 +80,7 @@ ${o.extraHead ?? ''}
 </head>
 <body>
 ${o.body}
-<script nonce="${esc(o.nonce)}">${copyScript}${o.script ?? ''}</script>
+${o.noScript ? '' : `<script nonce="${esc(o.nonce)}">${copyScript}${o.script ?? ''}</script>`}
 </body>
 </html>`;
 }
@@ -138,7 +138,7 @@ export function renderPanel(queue: Queue, options: RenderOptions): string {
     title: 'Pedidos', nonce: o.nonce, refreshSeconds: o.refreshSeconds,
     body: `
 <div class="top">
-  <div class="titlebar"><h1>Pedidos para produzir</h1>${o.scanHref ? `<a class="btn" href="${esc(o.scanHref)}">📷 Bipar</a>` : ''}</div>
+  <div class="titlebar"><h1>Pedidos para produzir</h1>${o.scanHref ? `<a class="btn" href="${esc(o.scanHref)}">📷 Bipar</a>` : ''}${o.productionHref ? `<a class="btn" href="${esc(o.productionHref)}">🧩 Produção</a>` : ''}</div>
   <div class="muted">${queue.orders.length} pedidos · atualizado às ${esc(time(generated, o.timezone))}${ageMin >= 90 ? ` · <span class="stale">dados de ${ageMin} min atrás</span>` : ageMin > 0 ? ` (há ${ageMin} min)` : ''}</div>
   ${accountAlerts(queue)}
   <nav class="chips">${missing ? `<a class="chip warn" href="#${esc(firstMissingSection(groups, o.personalizationKeywords))}">⚠️ Sem nome <b>${missing}</b></a>` : ''}${chips}</nav>
