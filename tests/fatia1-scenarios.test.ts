@@ -310,3 +310,14 @@ test('cenário: painel filtra pedidos, mantém totais e exibe avisos da coleta',
     ['{"event":"production_history_unavailable","code":"EACCES"}'],
   ]);
 });
+
+test("cenário: variationId '0' não junta variantes sem mapa diferentes", async () => {
+  const { buildProductionView } = await import('../apps/production/src/production.js');
+  const { validateComponentMap } = await import('../apps/production/src/component-map.js');
+  const m = validateComponentMap({ versao: 1, componentes: { elfo: { nome: 'Elfo', personalizado: false } }, deteccaoNatal: ['natal'], variantes: { '0': { productId: 'px', anuncio: 'x', variante: 'x', componentes: { elfo: 1 }, confirmado: true } } });
+  const t = Date.parse('2026-11-23T12:00:00.000Z');
+  const mk = (n: string, attr: string) => ({ orderNumber: n, priority: 'NORMAL' as const, deadline: null, deadlineEpoch: null, hoursRemaining: null, queues: ['TO_SHIP' as const], operationalStage: 'NEEDS_SHIPPING', platform: 'shopee', shopName: 's', platformOrderId: null, note: null, printLabelState: null, scanKeys: [], items: [{ productId: 'p9', variationId: '0', productName: 'Enfeite de Natal', productAttr: attr, quantity: 1, productSku: null, productImg: null }] });
+  const v = buildProductionView({ generatedAt: new Date(t).toISOString(), orders: [mk('Z1', 'Azul'), mk('Z2', 'Verde')] } as never, m, t);
+  assert.equal(v.unmapped.length, 2);
+  assert.equal(v.totals.aProduzir.elfo, 0);
+});

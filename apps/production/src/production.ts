@@ -43,7 +43,7 @@ export function buildProductionView(queue: Queue, map: ComponentMap, now: number
         mappingPending ||= !resolution.confirmed || resolution.attrChanged;
       } else if (resolution.kind === 'unmapped_christmas') {
         mappingPending = true;
-        const key = JSON.stringify(productId && variationId ? [productId, variationId] : [productId, variationId, productName, productAttr]);
+        const key = JSON.stringify(productId && variationId && variationId !== '0' ? [productId, variationId] : [productId, variationId, productName, productAttr]);
         if (variants.has(key)) continue;
         variants.add(key);
         const entry = unmapped.get(key) ?? { productId, variationId, productName, productAttr, orderCount: 0, guess: resolution.guess, reason: resolution.reason };

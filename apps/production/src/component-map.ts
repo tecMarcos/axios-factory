@@ -68,7 +68,7 @@ type Resolution =
   | { kind: 'other' };
 
 export function resolveItem(item: QueueOrder['items'][number], map: ComponentMap): Resolution {
-  const entry = item.variationId && Object.hasOwn(map.variantes, item.variationId) ? map.variantes[item.variationId] : undefined;
+  const entry = item.variationId && item.variationId !== '0' && Object.hasOwn(map.variantes, item.variationId) ? map.variantes[item.variationId] : undefined;
   const attr = fold(item.productAttr ?? '');
   if (entry && entry.productId === item.productId) {
     const parts = Object.fromEntries(Object.entries(entry.componentes).map(([id, count]) => [id, count * item.quantity]));
