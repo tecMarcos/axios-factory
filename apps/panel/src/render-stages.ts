@@ -60,15 +60,16 @@ function photo(url: string | null) {
 }
 
 function stepsBar(p: Piece) {
-  return `<div class="steps">${p.etapas.map((s, i) => `<span class="step${i < p.feitas ? ' ok' : i === p.feitas ? ' now' : ''}">${i < p.feitas ? '✓ ' : ''}${esc(stageInfo[s].nome)}</span>`).join('')}<span class="step">📦 Embalar</span></div>`;
+  return `<div class="steps">${p.etapas.map(s => { const ok = p.feitas.includes(s), now = p.pendentes.includes(s);
+    return `<span class="step${ok ? ' ok' : now ? ' now' : ''}">${ok ? '✓ ' : ''}${esc(stageInfo[s].nome)}</span>`; }).join('')}<span class="step">📦 Embalar</span></div>`;
 }
 
 function pieceRow(p: Piece, withCheckbox: boolean) {
   const c = p.card;
   const id = `p-${esc(p.piece).replace(/[^a-zA-Z0-9]/g, '_')}`;
   const names = p.nomes.length ? `<div class="names">${p.nomes.map(n => `<span class="name">${text(n)}</span>`).join('')}</div>` : '';
-  const undo = p.feitas > 0
-    ? `<button class="undo" type="submit" formaction="__UNDO__" name="v" value="${esc(p.piece)}">↩ voltar para ${esc(stageInfo[p.etapas[p.feitas - 1]!].nome.toLowerCase())}</button>` : '';
+  const undo = p.desfazer.map(d =>
+    `<button class="undo" type="submit" formaction="__UNDO__" name="v" value="${esc(`${d}:${p.piece}`)}">↩ desfazer “${esc(stageInfo[d].nome)}”</button>`).join(' ');
   return `<div class="row">${withCheckbox ? `<input type="checkbox" name="p" value="${esc(p.piece)}" id="${id}">` : ''}
     ${p.foto ? `<img class="thumb" src="${esc(p.foto)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<label for="${id}"><span class="qty">${p.quantidade}×</span> ${deadlineChip(c)}
       <div class="small">${text(c.displayId)} · ${text(platformLabel(c.platform))}${c.account ? ` · ${text(c.account)}` : ''}</div>
@@ -145,21 +146,21 @@ export function renderStageBoard(queue: Queue, map: ComponentMap, state: StageSt
     `<a class="tile ${cls}" href="${esc(href(v))}"${view === v ? ' aria-current="page"' : ''}><div class="n">${icon} ${n}</div><div class="l">${esc(label)}</div></a>`;
   const tiles = [
     tile('imprimir', stageInfo.imprimir.icone, count('imprimir'), 'imprimir'),
-    tile('nomes', stageInfo.nomes.icone, count('nomes'), 'nomes 3D'),
+    tile('nomes', stageInfo.nomes.icone, count('nomes'), 'nomes 3D p/ imprimir'),
     tile('colar', stageInfo.colar.icone, count('colar'), 'colar nomes'),
     tile('separar', stageInfo.separar.icone, count('separar'), 'separar'),
     tile('prontos', '✅', board.prontos.length, 'prontos p/ embalar', 'done'),
     tile('travados', '⛔', board.travados.length, 'travados', board.travados.length ? 'warn' : ''),
   ].join('');
-  const title = view === 'imprimir' ? '🖨️ O que imprimir agora' : view === 'prontos' ? '✅ Prontos para embalar' : view === 'travados' ? '⛔ Travados' : view === 'historico' ? '🗂️ Histórico da produção'
+  const title = view === 'imprimir' ? '🖨️ O que imprimir agora' : view === 'nomes' ? '🔠 Nomes 3D para imprimir' : view === 'prontos' ? '✅ Prontos para embalar' : view === 'travados' ? '⛔ Travados' : view === 'historico' ? '🗂️ Histórico da produção'
     : `${stageInfo[view].icone} ${stageInfo[view].nome}`;
   const body = view === 'prontos' ? readyView(board.prontos, board.pieces, o)
     : view === 'travados' ? blockedView(board.travados)
       : view === 'historico' ? historyView(o.history ?? [], o.timezone)
         : stageView(view, board.byStage[view], o);
-  const hint = view === 'imprimir' ? 'Marque as peças que saíram da impressora. Elas seguem sozinhas para a próxima etapa.'
-    : view === 'nomes' ? 'Crie os nomes 3D de cada pedido (use “Copiar nomes”) e marque quando estiverem prontos.'
-      : view === 'colar' ? 'Cole os nomes nas mãos e marque. Depois disso o pedido vai para “Prontos para embalar”.'
+  const hint = view === 'imprimir' ? `Marque as peças que saíram da impressora. Os nomes 3D das mãos ficam em “${stageInfo.nomes.icone} nomes 3D” e podem ser impressos ao mesmo tempo.`
+    : view === 'nomes' ? 'Estes são os nomes que o cliente mandou no pedido (UpSeller). Faça e imprima em 3D (use “Copiar nomes”) e marque quando saírem da impressora. Pode imprimir antes ou junto com as mãos.'
+      : view === 'colar' ? 'Aparece aqui quando a mão e os nomes 3D já foram impressos. Cole e marque; o pedido vai para “Prontos para embalar”.'
         : view === 'separar' ? 'Separe as peças de cada pedido e marque.' : '';
   return shell({
     title: 'Produção', nonce: o.nonce, script: copyScript,

@@ -233,28 +233,30 @@ export function createPanelHandler(config: PanelConfig) {
         // Sem cookie de aparelho não grava: todo registro sabe quem foi.
         if (!hadDevice) return done(428, false, 'Aparelho sem identificação', ['Abra a Produção de novo e repita. Se continuar, libere cookies para este site.']);
         const board = buildStageBoard(queue, map, t, state, packed);
-        const change = (p: Piece, etapa: StageId) => ({ piece: p.piece, etapa, pedido: p.card.displayId, peca: p.nome, quantidade: p.quantidade, ...(etapa === 'nomes' || etapa === 'colar' ? { nomes: p.nomes } : {}) });
+        const change = (p: Piece, etapa: StageId) => ({ piece: p.piece, etapa, etapas: p.etapas, pedido: p.card.displayId, peca: p.nome, quantidade: p.quantidade, ...(etapa === 'nomes' || etapa === 'colar' ? { nomes: p.nomes } : {}) });
         const line = (p: Piece) => `${p.quantidade}× ${p.nome} · ${p.card.displayId}${p.nomes.length ? ` · ${p.nomes.join(', ')}` : ''}`;
         try {
           if (sub === '/etapa-voltar') {
-            const p = board.pieces.find(x => x.piece === form!.get('v') && x.feitas > 0);
-            if (!p) return done(404, false, 'Peça não encontrada ou já voltou', [], 'imprimir');
-            const etapa = p.etapas[p.feitas - 1]!;
-            const applied = await applyStages(stagesDir, [{ change: change(p, etapa), from: p.feitas, to: p.feitas - 1 }], t, device);
-            if (!applied.length) return done(409, false, 'Outro aparelho mexeu nesta peça agora. Confira e tente de novo.', [], etapa);
+            const raw = form.get('v') ?? '';
+            const sep = raw.indexOf(':');
+            const etapa = raw.slice(0, sep) as StageId;
+            const p = board.pieces.find(x => x.piece === raw.slice(sep + 1) && x.feitas.includes(etapa));
+            if (sep < 1 || !stageIds.includes(etapa) || !p) return done(404, false, 'Peça não encontrada ou já desfeita', [], 'imprimir');
+            const applied = await applyStages(stagesDir, [{ change: change(p, etapa), undo: true }], t, device);
+            if (!applied.length) return done(409, false, 'Não dá para desfazer: tem uma etapa depois desta já marcada (desfaça ela antes), ou outro aparelho mexeu agora.', [], etapa);
             console.log(JSON.stringify({ event: 'stage_undone', stage: etapa, device: device.id }));
-            return done(200, true, `↩ Voltou para "${stageInfo[etapa].nome}"`, [line(p)], etapa);
+            return done(200, true, `↩ Desfeito: "${stageInfo[etapa].nome}"`, [line(p)], etapa);
           }
           const e = form.get('e') as StageId;
           if (!stageIds.includes(e)) return send(res, 400, 'Pedido inválido');
           const wanted = new Set(form.getAll('p'));
           const list = board.byStage[e].filter(p => wanted.has(p.piece));
           if (!list.length) return done(422, false, 'Nenhuma peça marcada', ['Toque nas caixinhas das peças que ficaram prontas e depois no botão verde.'], e);
-          const applied = new Set((await applyStages(stagesDir, list.map(p => ({ change: change(p, e), from: p.feitas, to: p.feitas + 1 })), t, device)).map(c => c.piece));
+          const applied = new Set((await applyStages(stagesDir, list.map(p => ({ change: change(p, e) })), t, device)).map(c => c.piece));
           const ok = list.filter(p => applied.has(p.piece));
           console.log(JSON.stringify({ event: 'stage_marked', stage: e, pieces: ok.length, device: device.id }));
           const skipped = list.length - ok.length;
-          return done(200, ok.length > 0, ok.length ? `✅ ${stageInfo[e].nome}: ${ok.reduce((n, p) => n + p.quantidade, 0)} peça(s) marcadas` : 'Nada mudou',
+          return done(200, ok.length > 0, ok.length ? (e === 'nomes' ? `✅ ${ok.reduce((n, p) => n + (p.nomes.length || p.quantidade), 0)} nome(s) 3D marcados como impressos` : `✅ ${stageInfo[e].nome}: ${ok.reduce((n, p) => n + p.quantidade, 0)} peça(s) marcadas`) : 'Nada mudou',
             [...ok.map(line), ...(skipped ? [`${skipped} já tinham sido marcadas por outro aparelho.`] : [])], e);
         } catch {
           console.error(JSON.stringify({ event: 'stages_write_failed' }));

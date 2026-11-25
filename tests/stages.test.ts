@@ -80,44 +80,79 @@ test('quadro: só pedidos liberados entram; peças por etapa, prazo mais curto p
   assert.deepEqual(board.byStage.imprimir.map(p => `${p.card.displayId}:${p.componentId}:${p.quantidade}`),
     ['FAKEB:biscoito:4', 'FAKEMIX:biscoito:2', 'FAKEMIX:elfo:2', 'FAKEM1:mao_coracao:2']);
   assert.deepEqual(board.byStage.imprimir.at(-1)!.nomes, ['Ana', 'Bia']);
-  assert.equal(board.byStage.nomes.length, 0);
+  assert.deepEqual(board.byStage.nomes.map(p => `${p.card.displayId}:${p.nomes.join(',')}`), ['FAKEM1:Ana,Bia'], 'nomes 3D já podem ser impressos');
+  assert.equal(board.byStage.colar.length, 0);
   assert.deepEqual(board.travados.map(c => c.displayId), ['FAKESEM']);
   assert.equal(board.prontos.length, 0);
 });
 
-test('marcar etapas: avança uma por vez, corrida entre aparelhos não pula etapa, desfazer e pedido pronto', async t => {
+test('marcar etapas: imprimir mão e nomes 3D em paralelo, colar só depois dos dois; corrida, desfazer, pronto', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'stages-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const q = queueOf(order('M1', ['mao2'], 'Ana, Bia', 20), order('E', ['elfo'], null, 5));
   const k = pieceKey('shopee|Conta Teste|M1', 'mao_coracao');
-  const change = { piece: k, etapa: 'imprimir' as const, pedido: 'M1', peca: 'Mão', quantidade: 2 };
+  const etapas = stagesFor(map, 'mao_coracao');
+  const change = { piece: k, etapa: 'imprimir' as const, etapas, pedido: 'M1', peca: 'Mão', quantidade: 2 };
+  // Antes de imprimir qualquer coisa, a mão já aparece em "imprimir" E em "nomes 3D".
+  let board = buildStageBoard(q, map, now, new Map());
+  assert.deepEqual(board.byStage.nomes.map(p => p.nomes), [['Ana', 'Bia']]);
+  assert.ok(board.byStage.imprimir.some(p => p.piece === k));
+  assert.equal(board.byStage.colar.length, 0);
+  // Colar antes de imprimir não vale.
+  assert.equal((await applyStages(dir, [{ change: { ...change, etapa: 'colar' } }], now, dev)).length, 0);
+  // Nomes primeiro, em dois celulares ao mesmo tempo: conta uma vez.
   const [a, b] = await Promise.all([
-    applyStages(dir, [{ change, from: 0, to: 1 }], now, dev),
-    applyStages(dir, [{ change, from: 0, to: 1 }], now, { id: 'ZZZZ2345' }),
+    applyStages(dir, [{ change: { ...change, etapa: 'nomes' } }], now, dev),
+    applyStages(dir, [{ change: { ...change, etapa: 'nomes' } }], now, { id: 'ZZZZ2345' }),
   ]);
   assert.equal(a.length + b.length, 1, 'dois celulares marcando a mesma peça: só um vale');
   let state = await loadStages(dir);
-  assert.equal(state.get(k)?.feitas, 1);
-  let board = buildStageBoard(q, map, now, state);
-  assert.deepEqual(board.byStage.nomes.map(p => p.nomes), [['Ana', 'Bia']]);
-  await applyStages(dir, [{ change: { ...change, etapa: 'nomes' }, from: 1, to: 2 }], now, dev);
-  await applyStages(dir, [{ change: { ...change, etapa: 'colar' }, from: 2, to: 3 }], now, dev);
+  assert.deepEqual(state.get(k)?.feitas, ['nomes']);
+  board = buildStageBoard(q, map, now, state);
+  assert.equal(board.byStage.nomes.length, 0);
+  assert.equal(board.byStage.colar.length, 0, 'falta imprimir a mão');
+  await applyStages(dir, [{ change }], now, dev);
+  state = await loadStages(dir);
+  board = buildStageBoard(q, map, now, state);
+  assert.deepEqual(board.byStage.colar.map(p => p.nomes), [['Ana', 'Bia']]);
+  // Com "colar" feito, não dá para desfazer a impressão (desfaz a colagem antes).
+  await applyStages(dir, [{ change: { ...change, etapa: 'colar' } }], now, dev);
+  assert.equal((await applyStages(dir, [{ change, undo: true }], now, dev)).length, 0);
   state = await loadStages(dir);
   board = buildStageBoard(q, map, now, state);
   assert.deepEqual(board.prontos.map(c => c.displayId), ['FAKEM1']);
+  assert.deepEqual(board.pieces.find(p => p.piece === k)!.desfazer, ['colar']);
   const card = packingCards(q, map, now).find(c => c.displayId === 'FAKEM1')!;
   assert.deepEqual(productionStatus(card, map, state), { pronto: true, pendentes: [] });
-  await applyStages(dir, [{ change: { ...change, etapa: 'colar' }, from: 3, to: 2 }], now, dev);
+  await applyStages(dir, [{ change: { ...change, etapa: 'colar' }, undo: true }], now, dev);
   state = await loadStages(dir);
   assert.deepEqual(productionStatus(card, map, state).pendentes, ['Mão Grinch coração: falta colar nomes']);
-  await assert.rejects(applyStages(dir, [{ change, from: 0, to: 1 }], now, { id: 'x' }), /DEVICE_ID_INVALID/);
+  await assert.rejects(applyStages(dir, [{ change }], now, { id: 'x' }), /DEVICE_ID_INVALID/);
   const hist = await loadStageHistory(dir);
-  assert.deepEqual(hist.map(h => `${h.acao}:${h.etapa}`), ['voltou:colar', 'feito:colar', 'feito:nomes', 'feito:imprimir']);
+  assert.deepEqual(hist.map(h => `${h.acao}:${h.etapa}`), ['voltou:colar', 'feito:colar', 'feito:imprimir', 'feito:nomes']);
   assert.equal(hist[0]!.dispositivo?.nome, 'Mesa 1');
   // Pedido embalado sai do quadro.
   await markPacked(dir, 'shopee|Conta Teste|M1', [], now);
   const { loadPacked } = await import('../apps/production/src/packing-store.js');
   assert.equal(buildStageBoard(q, map, now, state, await loadPacked(dir)).pieces.some(p => p.card.displayId === 'FAKEM1'), false);
+});
+
+test('registro da versão anterior (contagem de etapas) continua valendo', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'stages-v1-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const kM = pieceKey('shopee|Conta Teste|M1', 'mao_coracao');
+  const kB = pieceKey('shopee|Conta Teste|B', 'biscoito');
+  await writeFile(join(dir, 'producao.json'), JSON.stringify({ versao: 1, pecas: { [kM]: { feitas: 1, em: new Date(now).toISOString() }, [kB]: { feitas: 2, em: new Date(now).toISOString() } } }));
+  const q = queueOf(order('M1', ['mao2'], 'Ana, Bia', 20), order('B', ['bisc'], null, 2));
+  const board = buildStageBoard(q, map, now, await loadStages(dir));
+  const m = board.pieces.find(p => p.piece === kM)!;
+  assert.deepEqual(m.feitas, ['imprimir']);
+  assert.deepEqual(m.pendentes, ['nomes']);
+  assert.deepEqual(board.prontos.map(c => c.displayId), ['FAKEB']);
+  await applyStages(dir, [{ change: { piece: kM, etapa: 'nomes', etapas: m.etapas, pedido: 'M1', peca: 'Mão', quantidade: 2 } }], now, dev);
+  const state = await loadStages(dir);
+  assert.deepEqual(state.get(kM)?.feitas, ['imprimir', 'nomes']);
+  assert.equal(state.get(kB)?.feitas, 2, 'o que não mudou fica como estava');
 });
 
 test('painel: flag desligada mantém a Produção antiga; ligada mostra "O que imprimir agora" e grava etapas com o aparelho', async t => {
@@ -161,29 +196,42 @@ test('painel: flag desligada mantém a Produção antiga; ligada mostra "O que i
   const blocked = await request(on, base + '/etapa', 'POST', [['e', 'imprimir'], ['p', kSem]]);
   assert.equal(blocked.status, 422);
 
+  // Nomes 3D já aparecem antes de imprimir a mão: são os nomes do pedido no UpSeller.
+  const names0 = await request(on, base + '/producao?ver=nomes');
+  assert.match(names0.body, /🔠 Nomes 3D para imprimir/);
+  assert.match(names0.body, /📋 Copiar 2 nomes/);
+  assert.match(names0.body, /Marcar nomes como impressos/);
+  const namesMarked = await request(on, base + '/etapa', 'POST', [['e', 'nomes'], ['p', kM]]);
+  assert.equal(namesMarked.status, 200);
+  assert.match(namesMarked.body, /2 nome\(s\) 3D marcados como impressos/);
+  assert.equal((await request(on, base + '/etapa', 'POST', [['e', 'colar'], ['p', kM]])).status, 422, 'mão ainda não impressa');
+
   const marked = await request(on, base + '/etapa', 'POST', [['e', 'imprimir'], ['p', kM], ['p', kB]]);
   assert.equal(marked.status, 200);
   assert.match(marked.body, /6 peça\(s\) marcadas/);
   const again = await request(on, base + '/etapa', 'POST', [['e', 'imprimir'], ['p', kM]]);
   assert.equal(again.status, 422, 'já saiu da etapa');
-  const names = await request(on, base + '/producao?ver=nomes');
-  assert.match(names.body, /📋 Copiar 2 nomes/);
-  assert.match(names.body, /Marcar nomes como prontos|Criar nomes 3D/);
+  const colar = await request(on, base + '/producao?ver=colar');
+  assert.match(colar.body, /Marcar nomes colados/);
+  assert.match(colar.body, /desfazer “Imprimir peças”/);
+  assert.match(colar.body, /desfazer “Imprimir nomes 3D”/);
   const sep = await request(on, base + '/producao?ver=separar');
   assert.match(sep.body, /4 peças/);
 
-  const undo = await request(on, base + '/etapa-voltar', 'POST', [['v', kM]]);
+  const undo = await request(on, base + '/etapa-voltar', 'POST', [['v', `imprimir:${kM}`]]);
   assert.equal(undo.status, 200);
-  assert.match(undo.body, /Voltou para &quot;Imprimir&quot;|Voltou para "Imprimir"/);
+  assert.match(undo.body, /Desfeito: &quot;Imprimir peças&quot;|Desfeito: "Imprimir peças"/);
+  assert.equal((await request(on, base + '/etapa-voltar', 'POST', [['v', `imprimir:${kM}`]])).status, 404);
   assert.equal((await request(on, base + '/etapa-voltar', 'POST', [['v', kM]])).status, 404);
   const hist = await request(on, base + '/producao?ver=historico');
   assert.match(hist.body, /Mão Grinch coração/);
-  assert.match(hist.body, /↩️ Imprimir/);
+  assert.match(hist.body, /↩️ Imprimir peças/);
+  assert.match(hist.body, /✅ Imprimir nomes 3D/);
   const state = await loadStages(packDir);
-  assert.equal(state.get(kM)?.feitas, 0);
-  assert.equal(state.get(kB)?.feitas, 1);
+  assert.deepEqual(state.get(kM)?.feitas, ['nomes']);
+  assert.deepEqual(state.get(kB)?.feitas, ['imprimir']);
   const raw = await readFile(join(packDir, 'producao-historico.jsonl'), 'utf8');
-  assert.equal(raw.trim().split('\n').length, 3);
+  assert.equal(raw.trim().split('\n').length, 4);
   assert.match(raw, new RegExp(`"id":"${jar.split('=')[1]!.split('~')[0]}"`));
 });
 
