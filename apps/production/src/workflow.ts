@@ -1,7 +1,7 @@
 import type { Queue } from '../../collector/src/notifications.js';
 import { isConsumable, type ComponentMap } from './component-map.js';
 import { buildProductionView } from './production.js';
-import { orderKey, type PackedMap } from './packing-store.js';
+import { orderKey, type PackedMap, type PackTime } from './packing-store.js';
 import { cleanText } from '../../collector/src/orders-view.js';
 
 /**
@@ -12,16 +12,16 @@ export type ProductionOrder = ReturnType<typeof buildProductionView>['orders'][n
 
 export const decisionStatuses = ['pode_enviar', 'revisar', 'nao_enviar', 'ja_embalado'] as const;
 export type DecisionStatus = typeof decisionStatuses[number];
-export type Decision = { status: DecisionStatus; motivo: string; acao: string; embaladoEm?: string; dispositivo?: { id: string; nome?: string } };
+export type Decision = { status: DecisionStatus; motivo: string; acao: string; embaladoEm?: string; dispositivo?: { id: string; nome?: string }; tempo?: PackTime };
 
 /**
  * Pode mandar este pedido? Regra estrita: só sai o pedido com mapa confirmado
  * e nomes conferidos (ou sem nomes por não ter mão). Qualquer dúvida segura o pedido.
  */
-export function shippingDecision(order: Pick<ProductionOrder, 'packed' | 'mappingPending' | 'nameValidation'>, packedHere?: { embaladoEm: string; dispositivo?: { id: string; nome?: string } }): Decision {
+export function shippingDecision(order: Pick<ProductionOrder, 'packed' | 'mappingPending' | 'nameValidation'>, packedHere?: { embaladoEm: string; dispositivo?: { id: string; nome?: string }; tempo?: PackTime }): Decision {
   const names = order.nameValidation;
   if (order.packed) return { status: 'ja_embalado', motivo: 'Já embalado, aguardando coleta', acao: 'Nada a fazer' };
-  if (packedHere) return { status: 'ja_embalado', motivo: 'Embalado na bancada', acao: 'Separar para a coleta', embaladoEm: packedHere.embaladoEm, ...(packedHere.dispositivo ? { dispositivo: packedHere.dispositivo } : {}) };
+  if (packedHere) return { status: 'ja_embalado', motivo: 'Embalado na bancada', acao: 'Separar para a coleta', embaladoEm: packedHere.embaladoEm, ...(packedHere.dispositivo ? { dispositivo: packedHere.dispositivo } : {}), ...(packedHere.tempo ? { tempo: packedHere.tempo } : {}) };
   if (names.status === 'sem_nomes') {
     return { status: 'nao_enviar', motivo: `Falta o nome na observação do UpSeller (${names.expected} esperado${names.expected === 1 ? '' : 's'})`, acao: 'Conferir o nome com o cliente no marketplace e preencher a observação no UpSeller' };
   }

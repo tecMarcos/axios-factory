@@ -2,17 +2,26 @@ import type { Queue } from '../../collector/src/notifications.js';
 import { cleanText, formatRemaining, platformLabel, priorityLabels, stageLabel } from '../../collector/src/orders-view.js';
 import type { ComponentMap } from '../../production/src/component-map.js';
 import type { LiveOrder } from '../../collector/src/orders-view.js';
-import type { HistoryEvent, PackedMap } from '../../production/src/packing-store.js';
+import { PACK_TIME, type HistoryEvent, type PackedMap, type PackTime } from '../../production/src/packing-store.js';
 import { buildPackingQueue, buildPrintQueue, itemLabel, packingChecklist, type Decision, type PackingCard, type PrintJob } from '../../production/src/workflow.js';
 import { card, esc, shell, time } from './render.js';
 
 const text = (value: string | null | undefined) => esc(cleanText(value));
 type Links = { list: string; production: string; print: string; packing: string; scan?: string };
 /** Bancada com leitor: rotas de POST e o leitor de código já montado. */
-export type PackingStation = { confirm: string; undo: string; rename: string; device: { id: string; nome?: string }; scanner: { html: string; script: string } };
+export type PackingStation = { confirm: string; undo: string; rename: string; device: { id: string; nome?: string }; scanner: { html: string; script: string };
+  /** Carimbo do cronômetro oculto para o pedido aberto (vai num campo escondido do formulário). */
+  timer?: (key: string) => string };
 type Options = { history?: HistoryEvent[]; historyQuery?: string; all?: boolean; view?: string | null; now: number; nonce: string; links: Links; envLabel?: string; healthBar?: string; healthCss?: string; refreshSeconds?: number; timezone?: string; packed?: PackedMap; station?: PackingStation };
 
 export const workflowCss = `
+.ptime{display:inline-block;font-size:13px;border-radius:6px;padding:1px 6px;margin-left:4px}
+.t-normal{background:var(--bg);color:var(--muted)}
+.t-rapido{background:var(--late);color:#fff;font-weight:700}
+.t-fora{background:var(--bg);color:var(--muted);font-style:italic}
+.tsum{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin:10px 0}
+.tsum h2{margin:0 0 4px;font-size:18px}
+.tt{width:100%;border-collapse:collapse;font-size:14px;overflow-wrap:normal}.tt th,.tt td+td{white-space:nowrap}.tt th,.tt td{text-align:left;padding:4px;border-top:1px solid var(--line)}
 .wf{overflow-wrap:anywhere}
 .wf h2{font-size:18px;margin:22px 0 8px}
 .wf .nav{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
@@ -153,6 +162,47 @@ function contents(c: PackingCard, map: ComponentMap) {
   return `<ul>${parts}${others}</ul>${names}`;
 }
 
+/** 45s · 1min 05s · 2h 10min */
+export function formatDuration(segundos: number) {
+  const s = Math.round(segundos);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}min ${String(s % 60).padStart(2, '0')}s`;
+  return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}min`;
+}
+
+/** Tempo que o pedido levou para ser embalado, com alerta quando foi rápido demais. */
+export function packTimeTag(t: PackTime | undefined) {
+  if (!t) return '';
+  if (t.status === 'rapido') return ` <span class="ptime t-rapido">⚠️ ${esc(formatDuration(t.segundos))} · rápido demais: não seguiu o processo?</span>`;
+  if (t.status === 'fora') return ` <span class="ptime t-fora">⏱️ ${esc(formatDuration(t.segundos))} · fora da média (bipou e saiu?)</span>`;
+  return ` <span class="ptime t-normal">⏱️ ${esc(formatDuration(t.segundos))}</span>`;
+}
+
+/** Resumo do tempo por pedido: média só dos tempos normais; rápidos e descartados contados à parte. */
+function timeSummary(events: { acao: string; tempo?: PackTime; dispositivo?: { id: string; nome?: string } }[]) {
+  const timed = events.filter(e => e.acao === 'embalado' && e.tempo);
+  if (!timed.length) return '';
+  const stats = (list: typeof timed) => {
+    const ok = list.filter(e => e.tempo!.status === 'normal').map(e => e.tempo!.segundos).sort((a, b) => a - b);
+    return { n: ok.length, media: ok.length ? ok.reduce((a, b) => a + b, 0) / ok.length : 0, mediana: ok.length ? ok[Math.floor(ok.length / 2)]! : 0,
+      rapidos: list.filter(e => e.tempo!.status === 'rapido').length, fora: list.filter(e => e.tempo!.status === 'fora').length };
+  };
+  const all = stats(timed);
+  const people = new Map<string, { label: string; list: typeof timed }>();
+  for (const e of timed) {
+    const id = e.dispositivo?.id ?? '—';
+    const entry = people.get(id) ?? { label: e.dispositivo ? `${e.dispositivo.nome ? `${e.dispositivo.nome} · ` : ''}${e.dispositivo.id}` : 'sem aparelho', list: [] };
+    entry.list.push(e);
+    people.set(id, entry);
+  }
+  const row = (label: string, s: ReturnType<typeof stats>) => `<tr><td>${text(label)}</td><td>${s.n ? esc(formatDuration(s.media)) : '—'}</td><td>${s.n}</td><td>${s.rapidos ? `⚠️ ${s.rapidos}` : '0'}</td><td>${s.fora}</td></tr>`;
+  return `<section class="tsum"><h2>⏱️ Tempo por pedido</h2>
+    <p><strong>Média ${all.n ? esc(formatDuration(all.media)) : '—'}</strong>${all.n ? ` · mediana ${esc(formatDuration(all.mediana))}` : ''} · ${all.n} pedido${all.n === 1 ? '' : 's'} contados${all.rapidos ? ` · <span class="t-rapido">⚠️ ${all.rapidos} rápido${all.rapidos === 1 ? '' : 's'} demais</span>` : ''}${all.fora ? ` · ${all.fora} descartado${all.fora === 1 ? '' : 's'}` : ''}</p>
+    <p class="muted">Conta da abertura do pedido (bipar ou escolher) até salvar. Menos de ${PACK_TIME.rapidoSeg}s acende alerta; mais de ${PACK_TIME.foraSeg / 60} min fica fora da média.</p>
+    ${people.size > 1 || timed.some(e => e.dispositivo) ? `<table class="tt"><thead><tr><th>Quem</th><th>Média</th><th>Pedidos</th><th>⚠️</th><th>Fora</th></tr></thead><tbody>${[...people.values()].map(p => row(p.label, stats(p.list))).join('')}</tbody></table>` : ''}
+  </section>`;
+}
+
 /** "por Nome · ID" de quem marcou o pedido como embalado. */
 export function packedBy(d: Decision) {
   if (!d.dispositivo) return '';
@@ -172,7 +222,7 @@ function stationCard(c: PackingCard, map: ComponentMap, o: Options, st: PackingS
   const action = mode === 'fila'
     ? `<form class="pick" method="post" action="${esc(o.links.packing)}"><input type="hidden" name="k" value="${esc(c.key)}"><button class="btn big" type="submit">📦 Embalar este</button></form>`
     : mode === 'embalado' && c.decision.embaladoEm
-      ? `<div><strong>Embalado às ${esc(time(Date.parse(c.decision.embaladoEm), tz))}</strong>${packedBy(c.decision)}
+      ? `<div><strong>Embalado às ${esc(time(Date.parse(c.decision.embaladoEm), tz))}</strong>${packedBy(c.decision)}${packTimeTag(c.decision.tempo)}
           <form class="inline" method="post" action="${esc(st.undo)}"><input type="hidden" name="k" value="${esc(c.key)}"><button type="submit">Desfazer</button></form></div>`
       : mode === 'embalado' ? '<div><strong>Aguardando coleta (UpSeller)</strong></div>' : decisionBlock(c.decision);
   return `<article class="card p-${c.livePriority}${next ? ' next' : ''}">
@@ -199,11 +249,12 @@ function historyView(o: Options, st: PackingStation) {
     const header = d !== current ? `</ul><h2>${esc(d)}</h2><ul class="hist">` : '';
     current = d;
     const by = e.dispositivo ? ` · por ${e.dispositivo.nome ? `${text(e.dispositivo.nome)} · ` : ''}<span class="devid">${esc(e.dispositivo.id)}</span>` : '';
-    return `${header}<li${e.acao === 'desfeito' ? ' class="undone"' : ''}><strong>${esc(time(Date.parse(e.em), tz))} · ${e.acao === 'embalado' ? '✅ Embalado' : '↩️ Desfeito'}</strong> · <b class="pedido">${text(e.pedido)}</b>${by}
+    return `${header}<li${e.acao === 'desfeito' ? ' class="undone"' : ''}><strong>${esc(time(Date.parse(e.em), tz))} · ${e.acao === 'embalado' ? '✅ Embalado' : '↩️ Desfeito'}</strong> · <b class="pedido">${text(e.pedido)}</b>${by}${e.acao === 'embalado' ? packTimeTag(e.tempo) : ''}
       ${e.itens.length ? `<small>${e.itens.map(text).join(' · ')}</small>` : ''}</li>`;
   }).join('');
   return `<form class="search" method="get" action="${esc(o.links.packing)}"><input type="hidden" name="ver" value="historico">
       <input name="q" value="${esc(o.historyQuery ?? '')}" maxlength="60" placeholder="Buscar pedido, nome ou ID do aparelho" aria-label="Buscar no histórico"><button type="submit">Buscar</button></form>
+    ${timeSummary(events)}
     <p class="muted">Tudo o que foi embalado ou desfeito, por qualquer aparelho. Nada é apagado daqui.</p>
     ${rows ? `<ul class="hist">${rows}</ul>` : '<p>Nada no histórico ainda.</p>'}${events.length > 500 ? '<p class="muted">Mostrando os 500 mais recentes. Use a busca.</p>' : ''}`;
 }
@@ -257,7 +308,7 @@ export function renderPackingScan(map: ComponentMap, r: ScanResult, o: Options &
         <span class="sim"><input type="checkbox" name="q" value="${esc(q.id)}" required> Sim</span></label>`).join('');
     return `${head}${decisionBlock(c.decision)}
       <form method="post" action="${esc(o.station.confirm)}" autocomplete="off">
-        <input type="hidden" name="k" value="${esc(c.key)}">${r.fromList ? '\n        <input type="hidden" name="origem" value="lista">' : ''}
+        <input type="hidden" name="k" value="${esc(c.key)}">${o.station.timer ? `<input type="hidden" name="t0" value="${esc(o.station.timer(c.key))}">` : ''}${r.fromList ? '\n        <input type="hidden" name="origem" value="lista">' : ''}
         ${checks}
         <button class="btn big" type="submit">✅ Pedido embalado</button>
       </form>`;

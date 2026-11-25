@@ -8,7 +8,23 @@ import { readJson, writeJson } from '../../collector/src/health-files.js';
  * e nunca é enviado ao UpSeller.
  */
 export type Device = { id: string; nome?: string };
-export type PackRecord = { embaladoEm: string; conferido: string[]; dispositivo?: Device };
+/**
+ * Tempo de embalagem: da abertura do pedido (bipar ou escolher na lista) até salvar como embalado.
+ * Não aparece para quem embala; serve de dado. Rápido demais = não seguiu o processo (alerta);
+ * longo demais = bipou e saiu (fica registrado, mas fora da média).
+ */
+export const PACK_TIME = { rapidoSeg: 20, foraSeg: 15 * 60 } as const;
+export type PackTime = { segundos: number; status: 'rapido' | 'normal' | 'fora' };
+export function classifyPackTime(segundos: number): PackTime {
+  const s = Math.max(0, Math.round(segundos));
+  return { segundos: s, status: s < PACK_TIME.rapidoSeg ? 'rapido' : s > PACK_TIME.foraSeg ? 'fora' : 'normal' };
+}
+function validTime(t: unknown): PackTime | undefined {
+  const v = t as Partial<PackTime> | null | undefined;
+  return v && Number.isInteger(v.segundos) && (v.segundos as number) >= 0 && (v.status === 'rapido' || v.status === 'normal' || v.status === 'fora')
+    ? { segundos: v.segundos as number, status: v.status } : undefined;
+}
+export type PackRecord = { embaladoEm: string; conferido: string[]; dispositivo?: Device; tempo?: PackTime };
 
 export const deviceIdPattern = /^[A-Z2-9]{8}$/;
 /** Nome livre do aparelho/pessoa: sem controles, espaços normalizados, até 30 caracteres. */
@@ -43,7 +59,8 @@ function parse(json: unknown): PackedMap {
     const d = r.dispositivo as Partial<Device> | undefined;
     const dispositivo = d && typeof d.id === 'string' && deviceIdPattern.test(d.id)
       ? { id: d.id, ...(typeof d.nome === 'string' && cleanDeviceName(d.nome) ? { nome: cleanDeviceName(d.nome) } : {}) } : undefined;
-    map.set(key, { embaladoEm: r.embaladoEm, conferido: r.conferido, ...(dispositivo ? { dispositivo } : {}) });
+    const tempo = validTime(r.tempo);
+    map.set(key, { embaladoEm: r.embaladoEm, conferido: r.conferido, ...(dispositivo ? { dispositivo } : {}), ...(tempo ? { tempo } : {}) });
   }
   return map;
 }
@@ -69,7 +86,7 @@ async function save(dir: string, now: number, map: PackedMap, change: (map: Pack
 }
 
 export type HistoryEvent = {
-  em: string; acao: 'embalado' | 'desfeito'; key: string; pedido: string; itens: string[]; conferido?: string[]; dispositivo?: Device;
+  em: string; acao: 'embalado' | 'desfeito'; key: string; pedido: string; itens: string[]; conferido?: string[]; dispositivo?: Device; tempo?: PackTime;
 };
 /** O que o histórico guarda do pedido, para continuar legível depois que ele sai da fila. */
 export type OrderInfo = { pedido: string; itens: string[] };
@@ -79,15 +96,15 @@ async function appendHistory(dir: string, event: HistoryEvent) {
   await appendFile(join(dir, HISTORY), JSON.stringify(event) + '\n', { mode: 0o600 });
 }
 
-export async function markPacked(dir: string, key: string, conferido: string[], now: number, dispositivo?: Device, info?: OrderInfo) {
+export async function markPacked(dir: string, key: string, conferido: string[], now: number, dispositivo?: Device, info?: OrderInfo, tempo?: PackTime) {
   if (!keyPattern.test(key)) throw new Error('PACK_KEY_INVALID');
   if (dispositivo && !deviceIdPattern.test(dispositivo.id)) throw new Error('DEVICE_ID_INVALID');
   return serialize(dir, async () => {
     const map = await loadPacked(dir);
     if (map.has(key)) return map;
     // Histórico primeiro: se gravar o estado falhar depois, o evento já está registrado.
-    await appendHistory(dir, { em: new Date(now).toISOString(), acao: 'embalado', key, pedido: info?.pedido ?? key, itens: info?.itens ?? [], conferido, ...(dispositivo ? { dispositivo } : {}) });
-    return save(dir, now, map, m => m.set(key, { embaladoEm: new Date(now).toISOString(), conferido, ...(dispositivo ? { dispositivo } : {}) }));
+    await appendHistory(dir, { em: new Date(now).toISOString(), acao: 'embalado', key, pedido: info?.pedido ?? key, itens: info?.itens ?? [], conferido, ...(dispositivo ? { dispositivo } : {}), ...(tempo ? { tempo } : {}) });
+    return save(dir, now, map, m => m.set(key, { embaladoEm: new Date(now).toISOString(), conferido, ...(dispositivo ? { dispositivo } : {}), ...(tempo ? { tempo } : {}) }));
   });
 }
 
@@ -116,7 +133,7 @@ export async function loadHistory(dir: string, limit = 500): Promise<HistoryEven
     if (!line.trim()) continue;
     try {
       const e = JSON.parse(line) as HistoryEvent;
-      if (validEvent(e)) events.push({ ...e, ...(e.dispositivo ? { dispositivo: { id: e.dispositivo.id, ...(cleanDeviceName(e.dispositivo.nome) ? { nome: cleanDeviceName(e.dispositivo.nome) } : {}) } } : {}) });
+      if (validEvent(e)) events.push({ ...e, tempo: validTime(e.tempo), ...(e.dispositivo ? { dispositivo: { id: e.dispositivo.id, ...(cleanDeviceName(e.dispositivo.nome) ? { nome: cleanDeviceName(e.dispositivo.nome) } : {}) } } : {}) });
     } catch { /* linha incompleta */ }
   }
   return events.reverse().slice(0, limit);

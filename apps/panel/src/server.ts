@@ -16,8 +16,9 @@ import { loadSyncHistory, type History } from '../../production/src/sync-health.
 import { renderProduction } from './render-production.js';
 import { renderPacking, renderPrintQueue } from './render-workflow.js';
 import { decisionsFor, orderLines, packingCards, packingChecklist } from '../../production/src/workflow.js';
-import { cleanDeviceName, deviceIdPattern, loadHistory, loadPacked, markPacked, orderKey, unmarkPacked, validPackingDir, type Device, type PackedMap } from '../../production/src/packing-store.js';
+import { classifyPackTime, cleanDeviceName, deviceIdPattern, loadHistory, loadPacked, markPacked, orderKey, unmarkPacked, validPackingDir, type Device, type PackedMap } from '../../production/src/packing-store.js';
 import { renderPackingDone, renderPackingScan } from './render-workflow.js';
+import { createPackTimer } from './pack-timer.js';
 import { renderStageBoard, renderStageDone } from './render-stages.js';
 import { applyStages, buildStageBoard, loadStageHistory, loadStages, stageIds, stageInfo, type Piece, type StageId } from '../../production/src/stages.js';
 import { healthCss } from './render.js';
@@ -73,6 +74,7 @@ export function createPanelHandler(config: PanelConfig) {
   const expected = digest(config.token);
   const now = config.now ?? Date.now;
   const libPath = config.scannerLibPath ?? defaultScannerLib;
+  const packTimer = createPackTimer();
   let lib: Promise<Buffer | null> | undefined;
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://panel');
@@ -158,7 +160,9 @@ export function createPanelHandler(config: PanelConfig) {
       const cookieHeaders: Record<string, string> = packingDir && (!hadDevice || sub === '/aparelho')
         ? { 'Set-Cookie': deviceCookie(device!, `${base}/`, req.headers['x-forwarded-proto'] === 'https') } : {};
       const page = (body: string, status = 200) => html(res, body, nonce, status, cookieHeaders);
-      const station = packingDir ? { ...stationPaths, device: device!, rename: `${base}/aparelho`, scanner: scannerWidget({ action: `${base}/embalar`, lib: paths.lib, auto: url.searchParams.get('auto') === '1' }) } : undefined;
+      const station = packingDir ? { ...stationPaths, device: device!, rename: `${base}/aparelho`, scanner: scannerWidget({ action: `${base}/embalar`, lib: paths.lib, auto: url.searchParams.get('auto') === '1' }),
+        // Cronômetro oculto: só começa para quem já tem aparelho identificado (sem cookie não dá para salvar).
+        ...(hadDevice ? { timer: (key: string) => packTimer.start(key, device!.id, t) } : {}) } : undefined;
       const wantsHistory = !!packingDir && req.method === 'GET' && sub === '/embalar' && url.searchParams.get('ver') === 'historico';
       let history: Awaited<ReturnType<typeof loadHistory>> | undefined;
       if (wantsHistory) {
@@ -202,8 +206,10 @@ export function createPanelHandler(config: PanelConfig) {
           const checks = packingChecklist(card, map, form.get('origem') === 'lista');
           const missing = checks.filter(q => !answered.has(q.id));
           if (missing.length) return done(422, false, 'Faltou responder "Sim"', missing.map(q => q.pergunta).join(' · '));
-          await markPacked(packingDir!, key, checks.map(q => q.id), t, device!, { pedido: card.displayId, itens: orderLines(card, map) });
-          console.log(JSON.stringify({ event: 'pack_marked', checks: checks.length, device: device!.id }));
+          const seconds = packTimer.elapsed(form.get('t0'), key, device!.id, t);
+          const tempo = seconds === null ? undefined : classifyPackTime(seconds);
+          await markPacked(packingDir!, key, checks.map(q => q.id), t, device!, { pedido: card.displayId, itens: orderLines(card, map) }, tempo);
+          console.log(JSON.stringify({ event: 'pack_marked', checks: checks.length, device: device!.id, ...(tempo ? { seconds: tempo.segundos, timing: tempo.status } : { timing: 'sem_tempo' }) }));
           return done(200, true, `✅ ${card.displayId} embalado`, 'Pode colar a etiqueta e separar para a coleta.');
         } catch {
           console.error(JSON.stringify({ event: 'packing_write_failed' }));
