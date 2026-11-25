@@ -148,8 +148,11 @@ test('bancada: bipar, responder Sim em tudo, marcar embalado e desfazer', async 
   assert.equal((await request(on, base + '/embalado', 'POST', [['k', key], ['q', 'peca:mao_coracao'], ['q', 'nomes'], ['q', 'peca:cordao_vermelho']])).status, 409);
 
   const after = (await request(on, base + '/embalar')).body;
-  const doneAt = after.indexOf('Embalados na bancada (1)');
-  assert.ok(doneAt > 0 && after.indexOf('FAKEM1') > doneAt, 'sai da fila e aparece nos embalados');
+  assert.doesNotMatch(after, /FAKEM1/, 'sai da fila');
+  assert.match(after, /Embalados \(1\)/);
+  const packedTab = (await request(on, base + '/embalar?ver=embalados')).body;
+  assert.match(packedTab, /Embalados na bancada \(1\)[\s\S]*FAKEM1[\s\S]*Embalado às 09:00/);
+  assert.match((await request(on, base + '/embalar?ver=travados')).body, /FAKESEM[\s\S]*NÃO ENVIAR/);
   assert.match((await request(on, base + '/embalar', 'POST', [['c', 'FAKEM1']])).body, /Já embalado às 09:00/);
   assert.doesNotMatch((await request(on, base + '/impressao')).body, /FAKEM1/);
   assert.equal(buildPrintQueue(q, map, now, await loadPacked(packDir)).lines[0]!.jobs.length, 0);
@@ -159,4 +162,37 @@ test('bancada: bipar, responder Sim em tudo, marcar embalado e desfazer', async 
   assert.equal((await loadPacked(packDir)).size, 0);
   assert.equal((await request(on, base + '/desembalar', 'POST', [['k', key]])).status, 409);
   assert.match((await request(on, base + '/impressao')).body, /FAKEM1/);
+});
+
+test('bancada: escolher o pedido na lista, com foto, pede para confirmar a etiqueta', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'pick-'));
+  const packDir = await mkdtemp(join(tmpdir(), 'pick-pack-'));
+  t.after(() => Promise.all([dir, packDir].map(d => rm(d, { recursive: true, force: true }))));
+  const withPhoto = order('P1', ['bisc'], null, 9);
+  withPhoto.orderItemList[0]!.productImg = 'https://cf.shopee.com.br/file/biscoito.jpg';
+  const q = queueOf(order('P2', ['elfo'], null, 30), withPhoto);
+  await writeFile(join(dir, 'production-queue.json'), JSON.stringify(q));
+  await writeFile(join(dir, 'production-summary.json'), JSON.stringify(aggregateProduction(q)));
+  const on = createPanelHandler({ token, dataDir: dir, timezone: 'America/Sao_Paulo', keywords: ['natal'], now: () => now,
+    production: { map, historyLoader: async () => [], filas: true, embalagem: { dir: packDir } } });
+
+  const list = (await request(on, base + '/embalar')).body;
+  assert.ok(list.indexOf('FAKEP1') < list.indexOf('FAKEP2'), 'prazo mais curto primeiro');
+  assert.match(list, /PRÓXIMO[\s\S]*FAKEP1/);
+  assert.match(list, /<img src="https:\/\/cf\.shopee\.com\.br\/file\/biscoito\.jpg"/);
+  assert.match(list, /Falta embalar \(2\)/);
+  assert.equal((list.match(/📦 Embalar este/g) ?? []).length, 2);
+
+  const key = 'shopee|Conta Teste|P2';
+  const pick = await request(on, base + '/embalar', 'POST', [['k', key]]);
+  assert.match(pick.body, /A etiqueta colada é do pedido FAKEP2\?/);
+  assert.match(pick.body, /name="origem" value="lista"/);
+  const base3: [string, string][] = [['k', key], ['origem', 'lista'], ['q', 'peca:elfo'], ['q', 'peca:cordao_vermelho']];
+  assert.equal((await request(on, base + '/embalado', 'POST', base3)).status, 422, 'sem confirmar a etiqueta não grava');
+  assert.equal((await loadPacked(packDir)).size, 0);
+  assert.equal((await request(on, base + '/embalado', 'POST', [...base3, ['q', 'etiqueta']])).status, 200);
+  assert.deepEqual((await loadPacked(packDir)).get(key)?.conferido, ['peca:elfo', 'peca:cordao_vermelho', 'etiqueta']);
+  assert.match((await request(on, base + '/embalar', 'POST', [['k', 'shopee|Conta Teste|NADA']])).body, /Não encontrei esse código/);
+  // Bipado não pede a pergunta da etiqueta.
+  assert.doesNotMatch((await request(on, base + '/embalar', 'POST', [['c', 'FAKEP1']])).body, /etiqueta colada/);
 });

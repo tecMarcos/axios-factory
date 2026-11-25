@@ -84,7 +84,8 @@ export function buildPackingQueue(queue: Queue, map: ComponentMap, now: number, 
   const embalados = cards.filter(c => c.decision.status === 'ja_embalado');
   const embaladosAqui = embalados.filter(c => c.decision.embaladoEm)
     .sort((a, b) => Date.parse(b.decision.embaladoEm!) - Date.parse(a.decision.embaladoEm!));
-  return { proximo: liberados[0] ?? null, fila: liberados.slice(1), travados, embalados: embalados.length, embaladosAqui };
+  const aguardandoColeta = embalados.filter(c => !c.decision.embaladoEm);
+  return { proximo: liberados[0] ?? null, fila: liberados.slice(1), travados, embalados: embalados.length, embaladosAqui, aguardandoColeta };
 }
 
 export function packingCards(queue: Queue, map: ComponentMap, now: number, packed: PackedMap = new Map()): PackingCard[] {
@@ -101,7 +102,7 @@ export type Check = { id: string; pergunta: string; detalhe?: string[] };
  * peças impressas, nomes (só quando há peça personalizada), consumíveis (cordão)
  * e por último os itens que não são de Natal. Cada produto traz só o que é dele.
  */
-export function packingChecklist(order: Pick<PackingCard, 'parts' | 'expectedNames' | 'nameValidation' | 'items'>, map: ComponentMap): Check[] {
+export function packingChecklist(order: Pick<PackingCard, 'parts' | 'expectedNames' | 'nameValidation' | 'items' | 'displayId'>, map: ComponentMap, fromList = false): Check[] {
   const name = (id: string) => Object.hasOwn(map.componentes, id) ? map.componentes[id]!.nome : id;
   const present = Object.entries(order.parts).filter(([, n]) => n > 0);
   const printed = present.filter(([id]) => !isConsumable(map, id));
@@ -114,6 +115,8 @@ export function packingChecklist(order: Pick<PackingCard, 'parts' | 'expectedNam
   order.items.forEach((item, index) => {
     if (item.resolution.kind === 'other') checks.push({ id: `item:${index}`, pergunta: `Colocou ${item.quantity}× ${item.productAttr || item.productName}?` });
   });
+  // Escolhido na lista (sem bipar): confirma que a etiqueta é deste pedido.
+  if (fromList) checks.push({ id: 'etiqueta', pergunta: `A etiqueta colada é do pedido ${order.displayId}?` });
   return checks;
 }
 

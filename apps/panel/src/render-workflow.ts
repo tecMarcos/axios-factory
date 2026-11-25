@@ -10,7 +10,7 @@ const text = (value: string | null | undefined) => esc(cleanText(value));
 type Links = { list: string; production: string; print: string; packing: string; scan?: string };
 /** Bancada com leitor: rotas de POST e o leitor de código já montado. */
 export type PackingStation = { confirm: string; undo: string; scanner: { html: string; script: string } };
-type Options = { now: number; nonce: string; links: Links; envLabel?: string; healthBar?: string; healthCss?: string; refreshSeconds?: number; timezone?: string; packed?: PackedMap; station?: PackingStation };
+type Options = { view?: string | null; now: number; nonce: string; links: Links; envLabel?: string; healthBar?: string; healthCss?: string; refreshSeconds?: number; timezone?: string; packed?: PackedMap; station?: PackingStation };
 
 const css = `
 .wf{overflow-wrap:anywhere}
@@ -34,6 +34,15 @@ const css = `
 .wf .names{font-size:22px;font-weight:700;margin:4px 0 0}
 .wf .done{font-size:22px;font-weight:bold;border-radius:12px;padding:14px;margin:8px 0}
 .wf form.inline{display:inline}
+.wf .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 4px}
+.wf .tabs a{flex:1;text-align:center}
+.wf .tabs a[aria-current="page"]{outline:3px solid var(--ok);outline-offset:1px}
+.wf .photos{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.wf .photos img,.wf .photos .noimg{width:88px;height:88px;border-radius:10px;object-fit:cover;background:var(--bg);display:grid;place-items:center;font-size:30px}
+.wf .big-photos img,.wf .big-photos .noimg{width:140px;height:140px}
+.wf .pick{margin-top:10px}
+.wf .tag-next{display:inline-block;background:var(--ok);color:#fff;border-radius:6px;padding:2px 8px;font-size:13px;font-weight:bold}
+.wf details.scanner summary{cursor:pointer;font-weight:bold;font-size:18px;margin:10px 0}
 `;
 
 export const decisionCss = '.wf .decision{font-weight:bold;border-radius:10px;padding:8px;margin:6px 0}.wf .d-pode_enviar{background:var(--good);border:1px solid var(--ok)}.wf .d-revisar{background:var(--note);border:1px solid var(--urg)}.wf .d-nao_enviar{background:var(--miss);border:1px solid var(--late)}.wf .d-ja_embalado{background:var(--card);border:1px solid var(--line)}';
@@ -114,19 +123,70 @@ export function renderPacking(queue: Queue, map: ComponentMap, o: Options) {
     ${queueHtml}
     <p class="muted">${embalados} pedido(s) já embalado(s), aguardando coleta.</p>`, false);
   }
-  const tz = o.timezone ?? 'America/Sao_Paulo';
-  const done = embaladosAqui.map(c => `<li>${text(c.displayId)} · ${esc(time(Date.parse(c.decision.embaladoEm!), tz))}
-      <form class="inline" method="post" action="${esc(st.undo)}"><input type="hidden" name="k" value="${esc(c.key)}"><button type="submit">Desfazer</button></form></li>`).join('');
-  return page('Embalar', o, `
-    <section><h2>1. Bipe a etiqueta do pedido</h2>
-    ${st.scanner.html}</section>
-    <p class="muted">Depois de bipar, aparecem as perguntas desse pedido. Responda "Sim" em todas para marcar como embalado.</p>
-    ${queueHtml}
-    <section><h2>Embalados na bancada (${embaladosAqui.length})</h2>${done ? `<ul>${done}</ul>` : '<p>Nenhum ainda.</p>'}</section>
-    <p class="muted">${embalados - embaladosAqui.length} pedido(s) já aguardando coleta no UpSeller.</p>`, false, st.scanner.script);
+  return renderStation(queue, map, o, st);
 }
 
-type ScanResult = { scanned: string; matches: LiveOrder[]; cards: Map<string, PackingCard>; keyOf: (o: LiveOrder) => string; nextHref: string; personalizationKeywords: string[] };
+/** Fotos dos itens do pedido (só URLs https já filtradas pelo coletor). */
+function photos(c: Pick<PackingCard, 'items'>, big = false) {
+  const seen = new Set<string>();
+  const imgs = c.items.map(i => i.productImg).filter((u): u is string => !!u && !seen.has(u) && !!seen.add(u))
+    .map(u => `<img src="${esc(u)}" alt="" loading="lazy" referrerpolicy="no-referrer">`).join('');
+  return `<div class="photos${big ? ' big-photos' : ''}">${imgs || '<span class="noimg" aria-hidden="true">📦</span>'}</div>`;
+}
+
+function contents(c: PackingCard, map: ComponentMap) {
+  const name = (id: string) => text(Object.hasOwn(map.componentes, id) ? map.componentes[id]!.nome : id);
+  const parts = Object.entries(c.parts).filter(([, n]) => n > 0).map(([id, n]) => `<li>${n}× ${name(id)}</li>`).join('');
+  const others = c.items.filter(i => i.resolution.kind === 'other').map(i => `<li>${i.quantity}× ${text(i.productAttr || i.productName)}</li>`).join('');
+  const names = c.nameValidation.names.length ? `<div class="note"><strong>Nomes:</strong> ${c.nameValidation.names.map(text).join(', ')}</div>` : '';
+  return `<ul>${parts}${others}</ul>${names}`;
+}
+
+function stationCard(c: PackingCard, map: ComponentMap, o: Options, st: PackingStation, mode: 'fila' | 'travado' | 'embalado', next = false) {
+  const tz = o.timezone ?? 'America/Sao_Paulo';
+  const platformClass = c.platform === 'shopee' || c.platform === 'tiktok' ? c.platform : 'other';
+  const action = mode === 'fila'
+    ? `<form class="pick" method="post" action="${esc(o.links.packing)}"><input type="hidden" name="k" value="${esc(c.key)}"><button class="btn big" type="submit">📦 Embalar este</button></form>`
+    : mode === 'embalado' && c.decision.embaladoEm
+      ? `<div><strong>Embalado às ${esc(time(Date.parse(c.decision.embaladoEm), tz))}</strong>
+          <form class="inline" method="post" action="${esc(st.undo)}"><input type="hidden" name="k" value="${esc(c.key)}"><button type="submit">Desfazer</button></form></div>`
+      : mode === 'embalado' ? '<div><strong>Aguardando coleta (UpSeller)</strong></div>' : decisionBlock(c.decision);
+  return `<article class="card p-${c.livePriority}${next ? ' next' : ''}">
+    <header>${next ? '<span class="tag-next">PRÓXIMO</span>' : ''}<span class="badge ${platformClass}">${text(platformLabel(c.platform))}</span>
+      ${c.account ? `<span class="acct">${text(c.account)}</span>` : ''}
+      <span class="due">${esc(formatRemaining(c.liveHours))}</span></header>
+    <div class="id">${text(c.displayId)}</div>
+    ${photos(c)}
+    ${contents(c, map)}
+    ${mode === 'travado' ? `<div class="muted">Nota: ${text(c.note) || '—'}</div>` : ''}
+    ${action}
+  </article>`;
+}
+
+const stationViews = ['fila', 'travados', 'embalados'] as const;
+
+/** Bancada: leitor no topo e três abas — falta embalar, não enviar, embalados. */
+function renderStation(queue: Queue, map: ComponentMap, o: Options, st: PackingStation) {
+  const { proximo, fila, travados, embaladosAqui, aguardandoColeta } = buildPackingQueue(queue, map, o.now, o.packed);
+  const pending = proximo ? [proximo, ...fila] : [];
+  const view = stationViews.find(v => v === o.view) ?? 'fila';
+  const tab = (v: typeof stationViews[number], label: string, n: number) =>
+    `<a class="btn${view === v ? '' : ' ghost'}" href="${esc(o.links.packing)}${v === 'fila' ? '' : `?ver=${v}`}"${view === v ? ' aria-current="page"' : ''}>${label} (${n})</a>`;
+  const body = view === 'fila'
+    ? (pending.map((c, i) => stationCard(c, map, o, st, 'fila', i === 0)).join('') || '<p>Nada para embalar agora. 🎉</p>')
+    : view === 'travados'
+      ? (travados.map(c => stationCard(c, map, o, st, 'travado')).join('') || '<p>Nenhum pedido travado.</p>')
+      : `<h2>Embalados na bancada (${embaladosAqui.length})</h2>${embaladosAqui.map(c => stationCard(c, map, o, st, 'embalado')).join('') || '<p>Nenhum ainda.</p>'}
+         <h2>Aguardando coleta no UpSeller (${aguardandoColeta.length})</h2>${aguardandoColeta.map(c => stationCard(c, map, o, st, 'embalado')).join('') || '<p>Nenhum.</p>'}`;
+  return page('Embalar', o, `
+    <details class="scanner"${view === 'fila' ? ' open' : ''}><summary>📷 Bipar etiqueta</summary>
+    ${st.scanner.html}</details>
+    <p class="muted">Bipe a etiqueta ou escolha um pedido na lista. Depois responda "Sim" em todas as perguntas.</p>
+    <nav class="tabs">${tab('fila', 'Falta embalar', pending.length)}${tab('travados', 'Não enviar', travados.length)}${tab('embalados', 'Embalados', embaladosAqui.length + aguardandoColeta.length)}</nav>
+    ${body}`, false, st.scanner.script);
+}
+
+type ScanResult = { fromList?: boolean; scanned: string; matches: LiveOrder[]; cards: Map<string, PackingCard>; keyOf: (o: LiveOrder) => string; nextHref: string; personalizationKeywords: string[] };
 
 /** Tela depois de bipar: as perguntas de "Sim" do pedido, ou o motivo de não embalar. */
 export function renderPackingScan(map: ComponentMap, r: ScanResult, o: Options & { station: PackingStation }) {
@@ -137,7 +197,7 @@ export function renderPackingScan(map: ComponentMap, r: ScanResult, o: Options &
       return `<div class="decision d-revisar">Este produto ainda não tem roteiro de embalagem no painel. Embale conferindo o pedido abaixo.</div>
         ${card(m, { timezone: tz, personalizationKeywords: r.personalizationKeywords, large: true })}`;
     }
-    const head = `<div class="id">${text(c.displayId)}</div><div class="muted">${text(platformLabel(c.platform))}${c.account ? ` · ${text(c.account)}` : ''} · ${esc(formatRemaining(c.liveHours))}</div>`;
+    const head = `<div class="id">${text(c.displayId)}</div><div class="muted">${text(platformLabel(c.platform))}${c.account ? ` · ${text(c.account)}` : ''} · ${esc(formatRemaining(c.liveHours))}</div>${photos(c, true)}`;
     if (c.decision.status === 'ja_embalado') {
       const at = c.decision.embaladoEm ? ` às ${esc(time(Date.parse(c.decision.embaladoEm), tz))}` : '';
       const undo = c.decision.embaladoEm ? `<form method="post" action="${esc(o.station.undo)}"><input type="hidden" name="k" value="${esc(c.key)}"><button type="submit">Desfazer embalagem</button></form>` : '';
@@ -146,23 +206,24 @@ export function renderPackingScan(map: ComponentMap, r: ScanResult, o: Options &
     if (c.decision.status !== 'pode_enviar') {
       return `${head}${decisionBlock(c.decision)}<p><strong>Não embale.</strong> Separe o pedido e avise o Marcos.</p><div class="muted">Nota: ${text(c.note) || '—'}</div>`;
     }
-    const checks = packingChecklist(c, map).map(q => `<label class="q"><span>${text(q.pergunta)}${q.detalhe?.length ? `<div class="names">${q.detalhe.map(text).join(' · ')}</div>` : ''}</span>
+    const checks = packingChecklist(c, map, r.fromList).map(q => `<label class="q"><span>${text(q.pergunta)}${q.detalhe?.length ? `<div class="names">${q.detalhe.map(text).join(' · ')}</div>` : ''}</span>
         <span class="sim"><input type="checkbox" name="q" value="${esc(q.id)}" required> Sim</span></label>`).join('');
     return `${head}${decisionBlock(c.decision)}
       <form method="post" action="${esc(o.station.confirm)}" autocomplete="off">
-        <input type="hidden" name="k" value="${esc(c.key)}">
+        <input type="hidden" name="k" value="${esc(c.key)}">${r.fromList ? '\n        <input type="hidden" name="origem" value="lista">' : ''}
         ${checks}
         <button class="btn big" type="submit">✅ Pedido embalado</button>
       </form>`;
   }).join('<hr>');
   const notFound = `<div class="done d-nao_enviar">❌ Não encontrei esse código</div>
     <p class="muted">Pode ser um pedido já enviado ou que entrou depois da última atualização da lista.</p>`;
-  return page('Embalar', o, `${blocks || notFound}<p><a class="btn big" href="${esc(r.nextHref)}">📷 Bipar ${blocks ? 'outro' : 'de novo'}</a></p>`, false);
+  return page('Embalar', o, `${blocks || notFound}<p><a class="btn big ghost" href="${esc(o.links.packing)}">← Voltar para a lista</a></p><p><a class="btn big" href="${esc(r.nextHref)}">📷 Bipar ${blocks ? 'outro' : 'de novo'}</a></p>`, false);
 }
 
 /** Resposta depois de "Pedido embalado" ou "Desfazer". */
 export function renderPackingDone(o: Options, r: { ok: boolean; title: string; detail?: string; nextHref: string }) {
   return page('Embalar', o, `<div class="done d-${r.ok ? 'pode_enviar' : 'nao_enviar'}">${esc(r.title)}</div>
     ${r.detail ? `<p>${esc(r.detail)}</p>` : ''}
-    <p><a class="btn big" href="${esc(r.nextHref)}">📷 Bipar o próximo</a></p>`, false);
+    <p><a class="btn big" href="${esc(o.links.packing)}">📋 Voltar para a lista</a></p>
+    <p><a class="btn big ghost" href="${esc(r.nextHref)}">📷 Bipar o próximo</a></p>`, false);
 }

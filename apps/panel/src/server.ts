@@ -3,7 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defaultTimezone, validateTimezone } from '../../collector/src/operational.js';
+import { calculateHoursRemaining, calculatePriority, defaultTimezone, validateTimezone } from '../../collector/src/operational.js';
 import { readSnapshot } from '../../collector/src/snapshot.js';
 import { evaluateAlerts, healthConfigFromEnv, sessionAgeDays, type HealthConfig } from '../../collector/src/health-alerts.js';
 import { readHealth, type Health } from '../../collector/src/health.js';
@@ -131,13 +131,17 @@ export function createPanelHandler(config: PanelConfig) {
         catch { console.error(JSON.stringify({ event: 'packing_unavailable' })); return send(res, 503, 'Não consegui ler as embalagens. Tente de novo.', { 'Retry-After': '30' }); }
       }
       const station = packingDir ? { ...stationPaths, scanner: scannerWidget({ action: `${base}/embalar`, lib: paths.lib, auto: url.searchParams.get('auto') === '1' }) } : undefined;
-      const options = { now: t, nonce, links: workflowLinks, envLabel: config.production.envLabel, healthBar, healthCss, refreshSeconds: 120, timezone: config.timezone, packed, station };
+      const options = { view: req.method === 'GET' ? url.searchParams.get('ver') : null, now: t, nonce, links: workflowLinks, envLabel: config.production.envLabel, healthBar, healthCss, refreshSeconds: 120, timezone: config.timezone, packed, station };
       const nextHref = `${base}/embalar?auto=1`;
       if (station && sub === '/embalar' && form) {
-        const matches = findOrders(queue, form.get('c')?.slice(0, 300) ?? '', config.scanSecret, t);
-        console.log(JSON.stringify({ event: 'pack_scan', matched: matches.length }));
+        // Escolhido na lista (k) ou bipado (c).
+        const picked = form.get('k')?.slice(0, 300);
+        const matches = picked
+          ? queue.orders.filter(order => orderKey(order) === picked).map(order => ({ ...order, livePriority: calculatePriority(order.deadlineEpoch, t), liveHours: calculateHoursRemaining(order.deadlineEpoch, t) }))
+          : findOrders(queue, form.get('c')?.slice(0, 300) ?? '', config.scanSecret, t);
+        console.log(JSON.stringify({ event: picked ? 'pack_pick' : 'pack_scan', matched: matches.length }));
         const cards = new Map(packingCards({ ...queue, orders: matches }, map, t, packed).map(c => [c.key, c]));
-        return html(res, renderPackingScan(map, { scanned: '', matches, cards, keyOf: orderKey, nextHref, personalizationKeywords: config.keywords }, { ...options, station }), nonce);
+        return html(res, renderPackingScan(map, { fromList: !!picked, scanned: '', matches, cards, keyOf: orderKey, nextHref, personalizationKeywords: config.keywords }, { ...options, station }), nonce);
       }
       if (station && form && stationPost) {
         const key = form.get('k')?.slice(0, 300) ?? '';
@@ -155,7 +159,7 @@ export function createPanelHandler(config: PanelConfig) {
           if (card.decision.status === 'ja_embalado') return done(409, false, `${card.displayId} já está embalado`);
           if (card.decision.status !== 'pode_enviar') return done(409, false, `⛔ Não embale ${card.displayId}`, card.decision.motivo);
           const answered = new Set(form.getAll('q'));
-          const checks = packingChecklist(card, map);
+          const checks = packingChecklist(card, map, form.get('origem') === 'lista');
           const missing = checks.filter(q => !answered.has(q.id));
           if (missing.length) return done(422, false, 'Faltou responder "Sim"', missing.map(q => q.pergunta).join(' · '));
           await markPacked(packingDir!, key, checks.map(q => q.id), t);
