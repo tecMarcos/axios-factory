@@ -3,14 +3,14 @@ import { cleanText, formatRemaining, platformLabel, priorityLabels, stageLabel }
 import type { ComponentMap } from '../../production/src/component-map.js';
 import type { LiveOrder } from '../../collector/src/orders-view.js';
 import type { PackedMap } from '../../production/src/packing-store.js';
-import { buildPackingQueue, buildPrintQueue, packingChecklist, type Decision, type PackingCard, type PrintJob } from '../../production/src/workflow.js';
+import { buildPackingQueue, buildPrintQueue, itemLabel, packingChecklist, type Decision, type PackingCard, type PrintJob } from '../../production/src/workflow.js';
 import { card, esc, shell, time } from './render.js';
 
 const text = (value: string | null | undefined) => esc(cleanText(value));
 type Links = { list: string; production: string; print: string; packing: string; scan?: string };
 /** Bancada com leitor: rotas de POST e o leitor de código já montado. */
-export type PackingStation = { confirm: string; undo: string; scanner: { html: string; script: string } };
-type Options = { view?: string | null; now: number; nonce: string; links: Links; envLabel?: string; healthBar?: string; healthCss?: string; refreshSeconds?: number; timezone?: string; packed?: PackedMap; station?: PackingStation };
+export type PackingStation = { confirm: string; undo: string; rename: string; device: { id: string; nome?: string }; scanner: { html: string; script: string } };
+type Options = { all?: boolean; view?: string | null; now: number; nonce: string; links: Links; envLabel?: string; healthBar?: string; healthCss?: string; refreshSeconds?: number; timezone?: string; packed?: PackedMap; station?: PackingStation };
 
 const css = `
 .wf{overflow-wrap:anywhere}
@@ -42,6 +42,10 @@ const css = `
 .wf .big-photos img,.wf .big-photos .noimg{width:140px;height:140px}
 .wf .pick{margin-top:10px}
 .wf .tag-next{display:inline-block;background:var(--ok);color:#fff;border-radius:6px;padding:2px 8px;font-size:13px;font-weight:bold}
+.wf .device{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;margin:8px 0}
+.wf .device input{flex:1;min-width:140px;font-size:16px;padding:8px;border:1px solid var(--line);border-radius:8px}
+.wf .devid{font-family:ui-monospace,monospace;font-weight:bold;letter-spacing:1px}
+.wf .who{font-size:14px}
 .wf details.scanner summary{cursor:pointer;font-weight:bold;font-size:18px;margin:10px 0}
 `;
 
@@ -137,9 +141,22 @@ function photos(c: Pick<PackingCard, 'items'>, big = false) {
 function contents(c: PackingCard, map: ComponentMap) {
   const name = (id: string) => text(Object.hasOwn(map.componentes, id) ? map.componentes[id]!.nome : id);
   const parts = Object.entries(c.parts).filter(([, n]) => n > 0).map(([id, n]) => `<li>${n}× ${name(id)}</li>`).join('');
-  const others = c.items.filter(i => i.resolution.kind === 'other').map(i => `<li>${i.quantity}× ${text(i.productAttr || i.productName)}</li>`).join('');
+  const others = c.items.filter(i => i.resolution.kind === 'other').map(i => `<li>${i.quantity}× ${esc(itemLabel(i))}</li>`).join('');
   const names = c.nameValidation.names.length ? `<div class="note"><strong>Nomes:</strong> ${c.nameValidation.names.map(text).join(', ')}</div>` : '';
   return `<ul>${parts}${others}</ul>${names}`;
+}
+
+/** "por Nome · ID" de quem marcou o pedido como embalado. */
+export function packedBy(d: Decision) {
+  if (!d.dispositivo) return '';
+  return ` <span class="who">por ${d.dispositivo.nome ? `${text(d.dispositivo.nome)} · ` : ''}<span class="devid">${esc(d.dispositivo.id)}</span></span>`;
+}
+
+function deviceBox(st: PackingStation) {
+  return `<form class="device" method="post" action="${esc(st.rename)}" autocomplete="off">
+    <span>📱 Este aparelho: <span class="devid">${esc(st.device.id)}</span></span>
+    <input name="n" maxlength="30" value="${esc(st.device.nome ?? '')}" placeholder="Seu nome (ex.: Marcos)" aria-label="Nome de quem usa este aparelho">
+    <button type="submit">Salvar</button></form>`;
 }
 
 function stationCard(c: PackingCard, map: ComponentMap, o: Options, st: PackingStation, mode: 'fila' | 'travado' | 'embalado', next = false) {
@@ -148,7 +165,7 @@ function stationCard(c: PackingCard, map: ComponentMap, o: Options, st: PackingS
   const action = mode === 'fila'
     ? `<form class="pick" method="post" action="${esc(o.links.packing)}"><input type="hidden" name="k" value="${esc(c.key)}"><button class="btn big" type="submit">📦 Embalar este</button></form>`
     : mode === 'embalado' && c.decision.embaladoEm
-      ? `<div><strong>Embalado às ${esc(time(Date.parse(c.decision.embaladoEm), tz))}</strong>
+      ? `<div><strong>Embalado às ${esc(time(Date.parse(c.decision.embaladoEm), tz))}</strong>${packedBy(c.decision)}
           <form class="inline" method="post" action="${esc(st.undo)}"><input type="hidden" name="k" value="${esc(c.key)}"><button type="submit">Desfazer</button></form></div>`
       : mode === 'embalado' ? '<div><strong>Aguardando coleta (UpSeller)</strong></div>' : decisionBlock(c.decision);
   return `<article class="card p-${c.livePriority}${next ? ' next' : ''}">
@@ -167,7 +184,7 @@ const stationViews = ['fila', 'travados', 'embalados'] as const;
 
 /** Bancada: leitor no topo e três abas — falta embalar, não enviar, embalados. */
 function renderStation(queue: Queue, map: ComponentMap, o: Options, st: PackingStation) {
-  const { proximo, fila, travados, embaladosAqui, aguardandoColeta } = buildPackingQueue(queue, map, o.now, o.packed);
+  const { proximo, fila, travados, embaladosAqui, aguardandoColeta } = buildPackingQueue(queue, map, o.now, o.packed, { all: o.all });
   const pending = proximo ? [proximo, ...fila] : [];
   const view = stationViews.find(v => v === o.view) ?? 'fila';
   const tab = (v: typeof stationViews[number], label: string, n: number) =>
@@ -179,6 +196,7 @@ function renderStation(queue: Queue, map: ComponentMap, o: Options, st: PackingS
       : `<h2>Embalados na bancada (${embaladosAqui.length})</h2>${embaladosAqui.map(c => stationCard(c, map, o, st, 'embalado')).join('') || '<p>Nenhum ainda.</p>'}
          <h2>Aguardando coleta no UpSeller (${aguardandoColeta.length})</h2>${aguardandoColeta.map(c => stationCard(c, map, o, st, 'embalado')).join('') || '<p>Nenhum.</p>'}`;
   return page('Embalar', o, `
+    ${deviceBox(st)}
     <details class="scanner"${view === 'fila' ? ' open' : ''}><summary>📷 Bipar etiqueta</summary>
     ${st.scanner.html}</details>
     <p class="muted">Bipe a etiqueta ou escolha um pedido na lista. Depois responda "Sim" em todas as perguntas.</p>
@@ -201,7 +219,7 @@ export function renderPackingScan(map: ComponentMap, r: ScanResult, o: Options &
     if (c.decision.status === 'ja_embalado') {
       const at = c.decision.embaladoEm ? ` às ${esc(time(Date.parse(c.decision.embaladoEm), tz))}` : '';
       const undo = c.decision.embaladoEm ? `<form method="post" action="${esc(o.station.undo)}"><input type="hidden" name="k" value="${esc(c.key)}"><button type="submit">Desfazer embalagem</button></form>` : '';
-      return `${head}<div class="done d-ja_embalado">📦 Já embalado${at}</div>${undo}`;
+      return `${head}<div class="done d-ja_embalado">📦 Já embalado${at}${packedBy(c.decision)}</div>${undo}`;
     }
     if (c.decision.status !== 'pode_enviar') {
       return `${head}${decisionBlock(c.decision)}<p><strong>Não embale.</strong> Separe o pedido e avise o Marcos.</p><div class="muted">Nota: ${text(c.note) || '—'}</div>`;

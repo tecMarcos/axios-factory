@@ -10,7 +10,7 @@ import { aggregateProduction, buildProductionQueue } from '../apps/collector/src
 import { createPanelHandler } from '../apps/panel/src/server.js';
 import { validateComponentMap } from '../apps/production/src/component-map.js';
 import { loadPacked, markPacked, unmarkPacked, validPackingDir } from '../apps/production/src/packing-store.js';
-import { buildPrintQueue, packingCards, packingChecklist } from '../apps/production/src/workflow.js';
+import { buildPrintQueue, itemLabel, packingCards, packingChecklist } from '../apps/production/src/workflow.js';
 
 const now = Date.parse('2026-11-25T12:00:00Z');
 const map = validateComponentMap({
@@ -58,6 +58,8 @@ test('perguntas da bancada: cada produto só com o que é dele', () => {
     'Colocou 2× Biscoito natalino?', 'Colocou 2× Elfo natalino?', 'Colocou 4× cordão vermelho?',
   ]);
   const withOther = checklist(order('O', ['bisc'], null, 10, [{ name: 'Caneca azul', count: 1 }]));
+  assert.equal(itemLabel({ productName: 'Caneca 325ml', productAttr: 'Branca' }), 'Caneca 325ml — Branca');
+  assert.equal(itemLabel({ productName: ' Caneca ', productAttr: '  ' }), 'Caneca');
   assert.deepEqual(withOther.map(q => q.id), ['peca:biscoito', 'peca:cordao_vermelho', 'item:1']);
   assert.equal(withOther[2]!.pergunta, 'Colocou 1× Caneca azul?');
 });
@@ -79,6 +81,11 @@ test('registro de embalagem: grava, desfaz, ignora lixo, descarta antigos e não
   await writeFile(join(dir, 'embalagem.json'), 'não é json');
   assert.equal((await loadPacked(dir)).size, 0);
   await assert.rejects(markPacked(dir, 'x', [], now), /PACK_KEY_INVALID/);
+  await assert.rejects(markPacked(dir, 'a|b|7', [], now, { id: 'bad' }), /DEVICE_ID_INVALID/);
+  await writeFile(join(dir, 'embalagem.json'), '{"pedidos":{"ok|x|1":{"embaladoEm":"2026-11-25T10:00:00Z","conferido":[],"dispositivo":{"id":"ABCD2345","nome":" Ana\\n "}},"ok|x|2":{"embaladoEm":"2026-11-25T10:00:00Z","conferido":[],"dispositivo":{"id":"<x>"}}}}');
+  const devs = await loadPacked(dir);
+  assert.deepEqual(devs.get('ok|x|1')?.dispositivo, { id: 'ABCD2345', nome: 'Ana' });
+  assert.equal(devs.get('ok|x|2')?.dispositivo, undefined);
   assert.throws(() => validPackingDir(''), /PACKING_DIR_INVALID/);
   assert.throws(() => validPackingDir('data/embalagem'), /PACKING_DIR_INVALID/);
   assert.equal(validPackingDir(' /opt/embalagem '), '/opt/embalagem');
@@ -86,14 +93,17 @@ test('registro de embalagem: grava, desfaz, ignora lixo, descarta antigos e não
 
 const token = 'fake-panel-token-1234567890';
 const base = `/p/${token}`;
-async function request(handler: ReturnType<typeof createPanelHandler>, url: string, method = 'GET', fields?: [string, string][]) {
+// Guarda o cookie do aparelho como um celular faria.
+let jar = '';
+async function request(handler: ReturnType<typeof createPanelHandler>, url: string, method = 'GET', fields?: [string, string][], cookie = jar) {
   const body = fields ? new URLSearchParams(fields).toString() : undefined;
   const req = Object.assign(Readable.from(body ? [Buffer.from(body)] : []), {
-    url, method, headers: body !== undefined ? { 'content-type': 'application/x-www-form-urlencoded' } : {},
+    url, method, headers: { ...(body !== undefined ? { 'content-type': 'application/x-www-form-urlencoded' } : {}), ...(cookie ? { cookie } : {}) },
   }) as unknown as IncomingMessage;
   let status = 0, headers: Record<string, string> = {}, out = '';
   const res = { req, writeHead(c: number, h: Record<string, string>) { status = c; headers = h; }, end(v?: string | Buffer) { out = v ? String(v) : ''; } } as unknown as ServerResponse;
   await handler(req, res);
+  if (headers['Set-Cookie'] && cookie === jar) jar = headers['Set-Cookie'].split(';')[0]!;
   return { status, headers, body: out };
 }
 
@@ -195,4 +205,56 @@ test('bancada: escolher o pedido na lista, com foto, pede para confirmar a etiqu
   assert.match((await request(on, base + '/embalar', 'POST', [['k', 'shopee|Conta Teste|NADA']])).body, /Não encontrei esse código/);
   // Bipado não pede a pergunta da etiqueta.
   assert.doesNotMatch((await request(on, base + '/embalar', 'POST', [['c', 'FAKEP1']])).body, /etiqueta colada/);
+});
+
+test('aparelho: ID único por celular, nome opcional, gravado em cada embalado e exigido para gravar', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'device-'));
+  const packDir = await mkdtemp(join(tmpdir(), 'device-pack-'));
+  t.after(() => Promise.all([dir, packDir].map(d => rm(d, { recursive: true, force: true }))));
+  const q = queueOf(order('G1', [], 'Cor azul, sem laço', 6, [{ name: 'Caneca personalizada', count: 2 }]), order('B1', ['bisc'], null, 9));
+  await writeFile(join(dir, 'production-queue.json'), JSON.stringify(q));
+  await writeFile(join(dir, 'production-summary.json'), JSON.stringify(aggregateProduction(q)));
+  const on = createPanelHandler({ token, dataDir: dir, timezone: 'America/Sao_Paulo', keywords: ['natal'], now: () => now,
+    production: { map, historyLoader: async () => [], filas: true, embalagem: { dir: packDir } } });
+
+  jar = '';
+  const first = await request(on, base + '/embalar');
+  const set = first.headers['Set-Cookie']!;
+  assert.match(set, /^axf_dev=[A-Z2-9]{8}~; Path=\/p\/fake-panel-token-1234567890\/; Max-Age=31536000; HttpOnly; SameSite=Strict$/);
+  const id = /axf_dev=([A-Z2-9]{8})/.exec(set)![1]!;
+  assert.match(first.body, new RegExp(`Este aparelho: <span class="devid">${id}</span>`));
+  assert.equal((await request(on, base + '/embalar')).headers['Set-Cookie'], undefined, 'não troca o ID a cada visita');
+  const other = await request(on, base + '/embalar', 'GET', undefined, 'outro=1');
+  assert.notEqual(/axf_dev=([A-Z2-9]{8})/.exec(other.headers['Set-Cookie']!)![1], id, 'outro celular, outro ID');
+
+  const named = await request(on, base + '/aparelho', 'POST', [['n', '  Marcos\n<b>  ']]);
+  assert.match(named.body, /Este aparelho agora é &quot;Marcos &lt;b&gt;&quot;/);
+  assert.match(named.headers['Set-Cookie']!, new RegExp(`^axf_dev=${id}~`), 'mesmo ID, nome novo');
+  assert.match((await request(on, base + '/embalar')).body, /value="Marcos &lt;b&gt;"/);
+  assert.equal((await request(on, base + '/aparelho', 'GET')).status, 405);
+
+  // Produto que não é de Natal: aparece na fila e tem perguntas + botão.
+  const list = (await request(on, base + '/embalar')).body;
+  assert.ok(list.indexOf('FAKEG1') > 0 && list.indexOf('FAKEG1') < list.indexOf('FAKEB1'));
+  const scan = (await request(on, base + '/embalar', 'POST', [['c', 'FAKEG1']])).body;
+  assert.match(scan, /Colocou 2× Caneca personalizada\?/);
+  assert.match(list, /2× Caneca personalizada</);
+  assert.match(scan, /Conferiu a observação do pedido\?[\s\S]*Cor azul, sem laço/);
+  assert.match(scan, /✅ Pedido embalado/);
+  assert.doesNotMatch(scan, /ainda não tem roteiro/);
+
+  const key = 'shopee|Conta Teste|G1';
+  const answers: [string, string][] = [['k', key], ['q', 'item:0'], ['q', 'observacao']];
+  const noCookie = await request(on, base + '/embalado', 'POST', answers, '');
+  assert.equal(noCookie.status, 428);
+  assert.equal((await loadPacked(packDir)).size, 0, 'sem aparelho identificado não grava');
+  assert.equal((await request(on, base + '/embalado', 'POST', [['k', key], ['q', 'item:0']])).status, 422);
+  assert.equal((await request(on, base + '/embalado', 'POST', answers)).status, 200);
+  assert.deepEqual((await loadPacked(packDir)).get(key)?.dispositivo, { id, nome: 'Marcos <b>' });
+  assert.match((await request(on, base + '/embalar?ver=embalados')).body, new RegExp(`FAKEG1[\\s\\S]*por Marcos &lt;b&gt; · <span class="devid">${id}</span>`));
+  assert.match((await request(on, base + '/embalar', 'POST', [['c', 'FAKEG1']])).body, new RegExp(`Já embalado às 09:00 <span class="who">por Marcos`));
+  // A página de produção continua só com Natal.
+  assert.doesNotMatch((await request(on, base + '/producao')).body, /FAKEG1/);
+  // Cookie adulterado vira aparelho novo, não quebra.
+  assert.match((await request(on, base + '/embalar', 'GET', undefined, 'axf_dev=../../x~%%%')).headers['Set-Cookie']!, /^axf_dev=[A-Z2-9]{8}~;/);
 });

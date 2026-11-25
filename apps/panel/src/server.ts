@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +16,7 @@ import { loadSyncHistory, type History } from '../../production/src/sync-health.
 import { renderProduction } from './render-production.js';
 import { renderPacking, renderPrintQueue } from './render-workflow.js';
 import { decisionsFor, packingCards, packingChecklist } from '../../production/src/workflow.js';
-import { loadPacked, markPacked, orderKey, unmarkPacked, validPackingDir, type PackedMap } from '../../production/src/packing-store.js';
+import { cleanDeviceName, deviceIdPattern, loadPacked, markPacked, orderKey, unmarkPacked, validPackingDir, type Device, type PackedMap } from '../../production/src/packing-store.js';
 import { renderPackingDone, renderPackingScan } from './render-workflow.js';
 import { healthCss } from './render.js';
 import { renderPanel } from './render.js';
@@ -42,7 +42,22 @@ function send(res: ServerResponse, status: number, body: string | Buffer, header
   res.writeHead(status, { ...baseHeaders, 'Content-Type': 'text/plain; charset=utf-8', ...headers });
   res.end(res.req.method === 'HEAD' ? undefined : body);
 }
-const html = (res: ServerResponse, body: string, nonce: string, status = 200) => send(res, status, body, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': csp(nonce) });
+const html = (res: ServerResponse, body: string, nonce: string, status = 200, extra: Record<string, string> = {}) => send(res, status, body, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': csp(nonce), ...extra });
+
+// Aparelho da bancada: um ID único por celular (cookie só deste painel) + nome opcional.
+const DEVICE_COOKIE = 'axf_dev';
+const deviceAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const newDeviceId = () => Array.from({ length: 8 }, () => deviceAlphabet[randomInt(deviceAlphabet.length)]).join('');
+function readDevice(req: IncomingMessage): Device | null {
+  const raw = (req.headers.cookie ?? '').split(';').map(c => c.trim()).find(c => c.startsWith(`${DEVICE_COOKIE}=`))?.slice(DEVICE_COOKIE.length + 1) ?? '';
+  const [id = '', encoded = ''] = raw.split('~');
+  if (!deviceIdPattern.test(id)) return null;
+  let nome = '';
+  try { nome = cleanDeviceName(Buffer.from(encoded, 'base64url').toString('utf8')); } catch { nome = ''; }
+  return nome ? { id, nome } : { id };
+}
+const deviceCookie = (device: Device, path: string, secure: boolean) =>
+  `${DEVICE_COOKIE}=${device.id}~${Buffer.from(device.nome ?? '', 'utf8').toString('base64url')}; Path=${path}; Max-Age=31536000; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`;
 
 async function readForm(req: IncomingMessage, limit = 4096): Promise<URLSearchParams> {
   if (!(req.headers['content-type'] ?? '').startsWith('application/x-www-form-urlencoded')) throw new Error('BAD_FORM');
@@ -71,7 +86,7 @@ export function createPanelHandler(config: PanelConfig) {
     const packingDir = filas ? config.production?.embalagem?.dir : undefined;
     const stationPaths = { confirm: `${base}/embalado`, undo: `${base}/desembalar` };
     const workflowLinks = { list: base, production: `${base}/producao`, print: `${base}/impressao`, packing: `${base}/embalar`, ...(packingDir ? {} : { scan: paths.scan }) };
-    const stationPost = packingDir !== undefined && (sub === '/embalado' || sub === '/desembalar');
+    const stationPost = packingDir !== undefined && (sub === '/embalado' || sub === '/desembalar' || sub === '/aparelho');
     const allowed = sub === '/bipar' || (sub === '/embalar' && packingDir) ? ['GET', 'HEAD', 'POST'] : stationPost ? ['POST'] : ['GET', 'HEAD'];
     if (!['', '/bipar', '/leitor.js'].includes(sub) && !(sub === '/producao' && config.production) && !((sub === '/impressao' || sub === '/embalar') && filas) && !stationPost && !(sub === '/saude.json' && config.health)) return send(res, 404, 'Não encontrado');
     if (!allowed.includes(req.method ?? '')) return send(res, 405, 'Método não permitido', { Allow: allowed.join(', ') });
@@ -130,8 +145,16 @@ export function createPanelHandler(config: PanelConfig) {
         try { packed = await loadPacked(packingDir); }
         catch { console.error(JSON.stringify({ event: 'packing_unavailable' })); return send(res, 503, 'Não consegui ler as embalagens. Tente de novo.', { 'Retry-After': '30' }); }
       }
-      const station = packingDir ? { ...stationPaths, scanner: scannerWidget({ action: `${base}/embalar`, lib: paths.lib, auto: url.searchParams.get('auto') === '1' }) } : undefined;
-      const options = { view: req.method === 'GET' ? url.searchParams.get('ver') : null, now: t, nonce, links: workflowLinks, envLabel: config.production.envLabel, healthBar, healthCss, refreshSeconds: 120, timezone: config.timezone, packed, station };
+      // Aparelho: lê o cookie; se não tem, cria um ID agora e devolve no Set-Cookie.
+      let device = packingDir ? readDevice(req) : null;
+      const hadDevice = device !== null;
+      if (packingDir && !device) device = { id: newDeviceId() };
+      if (packingDir && sub === '/aparelho' && form) device = { id: device!.id, ...(cleanDeviceName(form.get('n')) ? { nome: cleanDeviceName(form.get('n')) } : {}) };
+      const cookieHeaders: Record<string, string> = packingDir && (!hadDevice || sub === '/aparelho')
+        ? { 'Set-Cookie': deviceCookie(device!, `${base}/`, req.headers['x-forwarded-proto'] === 'https') } : {};
+      const page = (body: string, status = 200) => html(res, body, nonce, status, cookieHeaders);
+      const station = packingDir ? { ...stationPaths, device: device!, rename: `${base}/aparelho`, scanner: scannerWidget({ action: `${base}/embalar`, lib: paths.lib, auto: url.searchParams.get('auto') === '1' }) } : undefined;
+      const options = { all: !!packingDir, view: req.method === 'GET' ? url.searchParams.get('ver') : null, now: t, nonce, links: workflowLinks, envLabel: config.production.envLabel, healthBar, healthCss, refreshSeconds: 120, timezone: config.timezone, packed, station };
       const nextHref = `${base}/embalar?auto=1`;
       if (station && sub === '/embalar' && form) {
         // Escolhido na lista (k) ou bipado (c).
@@ -140,20 +163,26 @@ export function createPanelHandler(config: PanelConfig) {
           ? queue.orders.filter(order => orderKey(order) === picked).map(order => ({ ...order, livePriority: calculatePriority(order.deadlineEpoch, t), liveHours: calculateHoursRemaining(order.deadlineEpoch, t) }))
           : findOrders(queue, form.get('c')?.slice(0, 300) ?? '', config.scanSecret, t);
         console.log(JSON.stringify({ event: picked ? 'pack_pick' : 'pack_scan', matched: matches.length }));
-        const cards = new Map(packingCards({ ...queue, orders: matches }, map, t, packed).map(c => [c.key, c]));
-        return html(res, renderPackingScan(map, { fromList: !!picked, scanned: '', matches, cards, keyOf: orderKey, nextHref, personalizationKeywords: config.keywords }, { ...options, station }), nonce);
+        const cards = new Map(packingCards({ ...queue, orders: matches }, map, t, packed, { all: true }).map(c => [c.key, c]));
+        return page(renderPackingScan(map, { fromList: !!picked, scanned: '', matches, cards, keyOf: orderKey, nextHref, personalizationKeywords: config.keywords }, { ...options, station }));
       }
       if (station && form && stationPost) {
-        const key = form.get('k')?.slice(0, 300) ?? '';
-        const card = packingCards(queue, map, t, packed).find(c => c.key === key);
         const done = (status: number, ok: boolean, title: string, detail?: string) =>
-          html(res, renderPackingDone(options, { ok, title, detail, nextHref }), nonce, status);
+          page(renderPackingDone(options, { ok, title, detail, nextHref }), status);
+        if (sub === '/aparelho') {
+          console.log(JSON.stringify({ event: 'pack_device_named', device: device!.id }));
+          return done(200, true, device!.nome ? `Este aparelho agora é "${device!.nome}"` : 'Nome do aparelho apagado', `ID do aparelho: ${device!.id}`);
+        }
+        // Sem cookie de aparelho não grava: assim todo "embalado" sabe quem foi.
+        if (!hadDevice) return done(428, false, 'Aparelho sem identificação', 'Abra o Embalar de novo e repita. Se continuar, libere cookies para este site.');
+        const key = form.get('k')?.slice(0, 300) ?? '';
+        const card = packingCards(queue, map, t, packed, { all: true }).find(c => c.key === key);
         if (!card) return done(404, false, 'Pedido não encontrado na lista atual', 'Bipe a etiqueta de novo.');
         try {
           if (sub === '/desembalar') {
             if (!packed.has(key)) return done(409, false, 'Este pedido não estava marcado como embalado');
             await unmarkPacked(packingDir!, key, t);
-            console.log(JSON.stringify({ event: 'pack_undone' }));
+            console.log(JSON.stringify({ event: 'pack_undone', device: device!.id }));
             return done(200, true, `Embalagem desfeita: ${card.displayId}`, 'O pedido voltou para a fila.');
           }
           if (card.decision.status === 'ja_embalado') return done(409, false, `${card.displayId} já está embalado`);
@@ -162,15 +191,15 @@ export function createPanelHandler(config: PanelConfig) {
           const checks = packingChecklist(card, map, form.get('origem') === 'lista');
           const missing = checks.filter(q => !answered.has(q.id));
           if (missing.length) return done(422, false, 'Faltou responder "Sim"', missing.map(q => q.pergunta).join(' · '));
-          await markPacked(packingDir!, key, checks.map(q => q.id), t);
-          console.log(JSON.stringify({ event: 'pack_marked', checks: checks.length }));
+          await markPacked(packingDir!, key, checks.map(q => q.id), t, device!);
+          console.log(JSON.stringify({ event: 'pack_marked', checks: checks.length, device: device!.id }));
           return done(200, true, `✅ ${card.displayId} embalado`, 'Pode colar a etiqueta e separar para a coleta.');
         } catch {
           console.error(JSON.stringify({ event: 'packing_write_failed' }));
           return done(500, false, 'Não consegui salvar. Tente de novo.');
         }
       }
-      return html(res, sub === '/impressao' ? renderPrintQueue(queue, map, options) : renderPacking(queue, map, options), nonce);
+      return page(sub === '/impressao' ? renderPrintQueue(queue, map, options) : renderPacking(queue, map, options));
     }
     if (sub === '/producao' && config.production) {
       const { map, historyLoader = loadSyncHistory, envLabel } = config.production;

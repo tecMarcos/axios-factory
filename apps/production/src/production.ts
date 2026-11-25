@@ -13,7 +13,8 @@ type Unmapped = Pick<Queue['orders'][number]['items'][number], 'productId' | 'va
   orderCount: number; guess: Parts | null; reason?: string;
 };
 
-export function buildProductionView(queue: Queue, map: ComponentMap, now: number) {
+/** includeOther: inclui pedidos sem item de Natal (só a bancada usa; a página de produção não). */
+export function buildProductionView(queue: Queue, map: ComponentMap, now: number, opts: { includeOther?: boolean } = {}) {
   const emptyParts = () => Object.fromEntries(Object.keys(map.componentes).map(id => [id, 0]));
   const totals = { aProduzir: emptyParts(), jaEmbalados: emptyParts(), unconfirmedParts: emptyParts() };
   const nameCounts = Object.fromEntries(nameStatuses.map(status => [status, 0])) as Record<typeof nameStatuses[number], number>;
@@ -28,7 +29,8 @@ export function buildProductionView(queue: Queue, map: ComponentMap, now: number
 
   const orders = [...groupByPriority({ ...queue, orders: unique }, now).values()].flat().flatMap(order => {
     const items = order.items.map(item => ({ ...item, resolution: resolveItem(item, map) }));
-    if (items.every(item => item.resolution.kind === 'other')) return [];
+    const generic = items.every(item => item.resolution.kind === 'other');
+    if (generic && !opts.includeOther) return [];
     const packed = order.operationalStage === 'NEEDS_PICKUP';
     const parts = emptyParts();
     const variants = new Set<string>();
@@ -58,7 +60,7 @@ export function buildProductionView(queue: Queue, map: ComponentMap, now: number
     });
     nameCounts[nameValidation.status]++;
     const { orderNumber, account, platform, livePriority, liveHours, operationalStage: stage, printLabelState } = order;
-    return [{ orderNumber, account, platform, displayId: displayOrderId(order), livePriority, liveHours, stage, printLabelState, packed, items, parts, note: order.note, expectedNames, nameValidation, mappingPending }];
+    return [{ orderNumber, account, platform, displayId: displayOrderId(order), livePriority, liveHours, stage, printLabelState, packed, items, parts, note: order.note, expectedNames, nameValidation, mappingPending, generic }];
   });
   return { orders, totals, nameCounts, unmapped: [...unmapped.values()] };
 }

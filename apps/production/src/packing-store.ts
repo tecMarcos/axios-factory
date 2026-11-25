@@ -6,7 +6,14 @@ import { readJson, writeJson } from '../../collector/src/health-files.js';
  * Fica numa pasta própria (PACKING_DIR), nunca na pasta de dados do coletor,
  * e nunca é enviado ao UpSeller.
  */
-export type PackRecord = { embaladoEm: string; conferido: string[] };
+export type Device = { id: string; nome?: string };
+export type PackRecord = { embaladoEm: string; conferido: string[]; dispositivo?: Device };
+
+export const deviceIdPattern = /^[A-Z2-9]{8}$/;
+/** Nome livre do aparelho/pessoa: sem controles, espaços normalizados, até 30 caracteres. */
+export function cleanDeviceName(value: string | null | undefined): string {
+  return (value ?? '').replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 30);
+}
 export type PackedMap = Map<string, PackRecord>;
 
 const FILE = 'embalagem.json';
@@ -30,7 +37,10 @@ function parse(json: unknown): PackedMap {
     const r = value as Partial<PackRecord> | null;
     if (!keyPattern.test(key) || !r || typeof r.embaladoEm !== 'string' || !Number.isFinite(Date.parse(r.embaladoEm))
       || !Array.isArray(r.conferido) || !r.conferido.every(c => typeof c === 'string')) continue;
-    map.set(key, { embaladoEm: r.embaladoEm, conferido: r.conferido });
+    const d = r.dispositivo as Partial<Device> | undefined;
+    const dispositivo = d && typeof d.id === 'string' && deviceIdPattern.test(d.id)
+      ? { id: d.id, ...(typeof d.nome === 'string' && cleanDeviceName(d.nome) ? { nome: cleanDeviceName(d.nome) } : {}) } : undefined;
+    map.set(key, { embaladoEm: r.embaladoEm, conferido: r.conferido, ...(dispositivo ? { dispositivo } : {}) });
   }
   return map;
 }
@@ -57,9 +67,10 @@ async function update(dir: string, now: number, change: (map: PackedMap) => void
   });
 }
 
-export async function markPacked(dir: string, key: string, conferido: string[], now: number) {
+export async function markPacked(dir: string, key: string, conferido: string[], now: number, dispositivo?: Device) {
   if (!keyPattern.test(key)) throw new Error('PACK_KEY_INVALID');
-  return update(dir, now, map => { if (!map.has(key)) map.set(key, { embaladoEm: new Date(now).toISOString(), conferido }); });
+  if (dispositivo && !deviceIdPattern.test(dispositivo.id)) throw new Error('DEVICE_ID_INVALID');
+  return update(dir, now, map => { if (!map.has(key)) map.set(key, { embaladoEm: new Date(now).toISOString(), conferido, ...(dispositivo ? { dispositivo } : {}) }); });
 }
 
 export function unmarkPacked(dir: string, key: string, now: number) {
