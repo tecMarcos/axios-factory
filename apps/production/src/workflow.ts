@@ -101,6 +101,15 @@ export function packingCards(queue: Queue, map: ComponentMap, now: number, packe
 export const itemLabel = (item: { productName: string; productAttr?: string | null }) =>
   cleanText(item.productAttr) ? `${cleanText(item.productName)} — ${cleanText(item.productAttr)}` : cleanText(item.productName);
 
+/** Resumo legível do pedido para o histórico: peças, nomes e itens. */
+export function orderLines(order: Pick<PackingCard, 'parts' | 'items' | 'nameValidation'>, map: ComponentMap): string[] {
+  const name = (id: string) => Object.hasOwn(map.componentes, id) ? map.componentes[id]!.nome : id;
+  const lines = Object.entries(order.parts).filter(([, n]) => n > 0).map(([id, n]) => `${n}× ${name(id)}`);
+  for (const item of order.items) if (item.resolution.kind === 'other') lines.push(`${item.quantity}× ${itemLabel(item)}`);
+  if (order.nameValidation.names.length) lines.push(`Nomes: ${order.nameValidation.names.join(', ')}`);
+  return lines;
+}
+
 export type Check = { id: string; pergunta: string; detalhe?: string[] };
 
 /**

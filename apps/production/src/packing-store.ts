@@ -1,4 +1,5 @@
-import { isAbsolute } from 'node:path';
+import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
 import { readJson, writeJson } from '../../collector/src/health-files.js';
 
 /**
@@ -17,6 +18,8 @@ export function cleanDeviceName(value: string | null | undefined): string {
 export type PackedMap = Map<string, PackRecord>;
 
 const FILE = 'embalagem.json';
+/** Histórico permanente: uma linha por evento, só acrescenta, nunca apaga. */
+const HISTORY = 'embalagem-historico.jsonl';
 const KEEP_DAYS = 30;
 const keyPattern = /^[^\x00-\x1f\x7f]{3,200}$/;
 
@@ -57,22 +60,64 @@ function serialize<T>(dir: string, action: () => Promise<T>): Promise<T> {
   return run;
 }
 
-async function update(dir: string, now: number, change: (map: PackedMap) => void) {
+async function save(dir: string, now: number, map: PackedMap, change: (map: PackedMap) => void) {
+  change(map);
+  // Só o estado "embalado agora" é limpo; o histórico (embalagem-historico.jsonl) fica para sempre.
+  for (const [key, record] of map) if (now - Date.parse(record.embaladoEm) > KEEP_DAYS * 86400000) map.delete(key);
+  await writeJson(dir, FILE, { versao: 1, pedidos: Object.fromEntries(map) });
+  return map;
+}
+
+export type HistoryEvent = {
+  em: string; acao: 'embalado' | 'desfeito'; key: string; pedido: string; itens: string[]; conferido?: string[]; dispositivo?: Device;
+};
+/** O que o histórico guarda do pedido, para continuar legível depois que ele sai da fila. */
+export type OrderInfo = { pedido: string; itens: string[] };
+
+async function appendHistory(dir: string, event: HistoryEvent) {
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await appendFile(join(dir, HISTORY), JSON.stringify(event) + '\n', { mode: 0o600 });
+}
+
+export async function markPacked(dir: string, key: string, conferido: string[], now: number, dispositivo?: Device, info?: OrderInfo) {
+  if (!keyPattern.test(key)) throw new Error('PACK_KEY_INVALID');
+  if (dispositivo && !deviceIdPattern.test(dispositivo.id)) throw new Error('DEVICE_ID_INVALID');
   return serialize(dir, async () => {
     const map = await loadPacked(dir);
-    change(map);
-    for (const [key, record] of map) if (now - Date.parse(record.embaladoEm) > KEEP_DAYS * 86400000) map.delete(key);
-    await writeJson(dir, FILE, { versao: 1, pedidos: Object.fromEntries(map) });
-    return map;
+    if (map.has(key)) return map;
+    // Histórico primeiro: se gravar o estado falhar depois, o evento já está registrado.
+    await appendHistory(dir, { em: new Date(now).toISOString(), acao: 'embalado', key, pedido: info?.pedido ?? key, itens: info?.itens ?? [], conferido, ...(dispositivo ? { dispositivo } : {}) });
+    return save(dir, now, map, m => m.set(key, { embaladoEm: new Date(now).toISOString(), conferido, ...(dispositivo ? { dispositivo } : {}) }));
   });
 }
 
-export async function markPacked(dir: string, key: string, conferido: string[], now: number, dispositivo?: Device) {
-  if (!keyPattern.test(key)) throw new Error('PACK_KEY_INVALID');
-  if (dispositivo && !deviceIdPattern.test(dispositivo.id)) throw new Error('DEVICE_ID_INVALID');
-  return update(dir, now, map => { if (!map.has(key)) map.set(key, { embaladoEm: new Date(now).toISOString(), conferido, ...(dispositivo ? { dispositivo } : {}) }); });
+export function unmarkPacked(dir: string, key: string, now: number, dispositivo?: Device, info?: OrderInfo) {
+  return serialize(dir, async () => {
+    const map = await loadPacked(dir);
+    if (!map.has(key)) return map;
+    await appendHistory(dir, { em: new Date(now).toISOString(), acao: 'desfeito', key, pedido: info?.pedido ?? key, itens: info?.itens ?? [], ...(dispositivo ? { dispositivo } : {}) });
+    return save(dir, now, map, m => { m.delete(key); });
+  });
 }
 
-export function unmarkPacked(dir: string, key: string, now: number) {
-  return update(dir, now, map => { map.delete(key); });
+function validEvent(e: unknown): e is HistoryEvent {
+  const v = e as Partial<HistoryEvent> | null;
+  return !!v && typeof v.em === 'string' && Number.isFinite(Date.parse(v.em)) && (v.acao === 'embalado' || v.acao === 'desfeito')
+    && typeof v.key === 'string' && typeof v.pedido === 'string' && Array.isArray(v.itens) && v.itens.every(i => typeof i === 'string')
+    && (v.dispositivo === undefined || (typeof v.dispositivo?.id === 'string' && deviceIdPattern.test(v.dispositivo.id)));
+}
+
+/** Eventos do histórico, do mais novo para o mais antigo. Linhas estragadas são ignoradas. */
+export async function loadHistory(dir: string, limit = 500): Promise<HistoryEvent[]> {
+  let raw = '';
+  try { raw = await readFile(join(dir, HISTORY), 'utf8'); } catch { return []; }
+  const events: HistoryEvent[] = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line) as HistoryEvent;
+      if (validEvent(e)) events.push({ ...e, ...(e.dispositivo ? { dispositivo: { id: e.dispositivo.id, ...(cleanDeviceName(e.dispositivo.nome) ? { nome: cleanDeviceName(e.dispositivo.nome) } : {}) } } : {}) });
+    } catch { /* linha incompleta */ }
+  }
+  return events.reverse().slice(0, limit);
 }

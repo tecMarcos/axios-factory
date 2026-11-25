@@ -15,8 +15,8 @@ import { defaultComponentMapPath, loadComponentMap, type ComponentMap } from '..
 import { loadSyncHistory, type History } from '../../production/src/sync-health.js';
 import { renderProduction } from './render-production.js';
 import { renderPacking, renderPrintQueue } from './render-workflow.js';
-import { decisionsFor, packingCards, packingChecklist } from '../../production/src/workflow.js';
-import { cleanDeviceName, deviceIdPattern, loadPacked, markPacked, orderKey, unmarkPacked, validPackingDir, type Device, type PackedMap } from '../../production/src/packing-store.js';
+import { decisionsFor, orderLines, packingCards, packingChecklist } from '../../production/src/workflow.js';
+import { cleanDeviceName, deviceIdPattern, loadHistory, loadPacked, markPacked, orderKey, unmarkPacked, validPackingDir, type Device, type PackedMap } from '../../production/src/packing-store.js';
 import { renderPackingDone, renderPackingScan } from './render-workflow.js';
 import { healthCss } from './render.js';
 import { renderPanel } from './render.js';
@@ -154,7 +154,13 @@ export function createPanelHandler(config: PanelConfig) {
         ? { 'Set-Cookie': deviceCookie(device!, `${base}/`, req.headers['x-forwarded-proto'] === 'https') } : {};
       const page = (body: string, status = 200) => html(res, body, nonce, status, cookieHeaders);
       const station = packingDir ? { ...stationPaths, device: device!, rename: `${base}/aparelho`, scanner: scannerWidget({ action: `${base}/embalar`, lib: paths.lib, auto: url.searchParams.get('auto') === '1' }) } : undefined;
-      const options = { all: !!packingDir, view: req.method === 'GET' ? url.searchParams.get('ver') : null, now: t, nonce, links: workflowLinks, envLabel: config.production.envLabel, healthBar, healthCss, refreshSeconds: 120, timezone: config.timezone, packed, station };
+      const wantsHistory = !!packingDir && req.method === 'GET' && sub === '/embalar' && url.searchParams.get('ver') === 'historico';
+      let history: Awaited<ReturnType<typeof loadHistory>> | undefined;
+      if (wantsHistory) {
+        try { history = await loadHistory(packingDir!, 2000); }
+        catch { return send(res, 503, 'Não consegui ler o histórico. Tente de novo.', { 'Retry-After': '30' }); }
+      }
+      const options = { history, historyQuery: wantsHistory ? (url.searchParams.get('q') ?? '').slice(0, 60) : '', all: !!packingDir, view: req.method === 'GET' ? url.searchParams.get('ver') : null, now: t, nonce, links: workflowLinks, envLabel: config.production.envLabel, healthBar, healthCss, refreshSeconds: 120, timezone: config.timezone, packed, station };
       const nextHref = `${base}/embalar?auto=1`;
       if (station && sub === '/embalar' && form) {
         // Escolhido na lista (k) ou bipado (c).
@@ -181,7 +187,7 @@ export function createPanelHandler(config: PanelConfig) {
         try {
           if (sub === '/desembalar') {
             if (!packed.has(key)) return done(409, false, 'Este pedido não estava marcado como embalado');
-            await unmarkPacked(packingDir!, key, t);
+            await unmarkPacked(packingDir!, key, t, device!, { pedido: card.displayId, itens: orderLines(card, map) });
             console.log(JSON.stringify({ event: 'pack_undone', device: device!.id }));
             return done(200, true, `Embalagem desfeita: ${card.displayId}`, 'O pedido voltou para a fila.');
           }
@@ -191,7 +197,7 @@ export function createPanelHandler(config: PanelConfig) {
           const checks = packingChecklist(card, map, form.get('origem') === 'lista');
           const missing = checks.filter(q => !answered.has(q.id));
           if (missing.length) return done(422, false, 'Faltou responder "Sim"', missing.map(q => q.pergunta).join(' · '));
-          await markPacked(packingDir!, key, checks.map(q => q.id), t, device!);
+          await markPacked(packingDir!, key, checks.map(q => q.id), t, device!, { pedido: card.displayId, itens: orderLines(card, map) });
           console.log(JSON.stringify({ event: 'pack_marked', checks: checks.length, device: device!.id }));
           return done(200, true, `✅ ${card.displayId} embalado`, 'Pode colar a etiqueta e separar para a coleta.');
         } catch {

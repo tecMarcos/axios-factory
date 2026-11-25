@@ -9,7 +9,7 @@ import { normalize } from '../apps/collector/src/core.js';
 import { aggregateProduction, buildProductionQueue } from '../apps/collector/src/operational.js';
 import { createPanelHandler } from '../apps/panel/src/server.js';
 import { validateComponentMap } from '../apps/production/src/component-map.js';
-import { loadPacked, markPacked, unmarkPacked, validPackingDir } from '../apps/production/src/packing-store.js';
+import { loadHistory, loadPacked, markPacked, unmarkPacked, validPackingDir } from '../apps/production/src/packing-store.js';
 import { buildPrintQueue, itemLabel, packingCards, packingChecklist } from '../apps/production/src/workflow.js';
 
 const now = Date.parse('2026-11-25T12:00:00Z');
@@ -257,4 +257,85 @@ test('aparelho: ID único por celular, nome opcional, gravado em cada embalado e
   assert.doesNotMatch((await request(on, base + '/producao')).body, /FAKEG1/);
   // Cookie adulterado vira aparelho novo, não quebra.
   assert.match((await request(on, base + '/embalar', 'GET', undefined, 'axf_dev=../../x~%%%')).headers['Set-Cookie']!, /^axf_dev=[A-Z2-9]{8}~;/);
+});
+
+test('caso do print: chaveiro (fora do Natal), etiqueta a imprimir, atrasado -> perguntas e botão', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'print-case-'));
+  const packDir = await mkdtemp(join(tmpdir(), 'print-case-pack-'));
+  t.after(() => Promise.all([dir, packDir].map(d => rm(d, { recursive: true, force: true }))));
+  const o = { ...normalize({
+    orderNumber: '2611245C1JRNTR', orderId: 'UPS999', platform: 'shopee', orderComment: null, orderTimeoutTime: (now - 2 * 3600000) / 1000,
+    orderItemList: [{ productId: 'k1', variationId: 'k1', productName: 'Chaveiro Clicável Brawl Stars', productAttr: null, productCount: 1, productImg: 'https://cf.shopee.com.br/file/x.jpg' }],
+  }), queues: ['TO_PRINT'] as ('TO_PRINT')[], account: 'Principal' };
+  const q = buildProductionQueue([o], now);
+  await writeFile(join(dir, 'production-queue.json'), JSON.stringify(q));
+  await writeFile(join(dir, 'production-summary.json'), JSON.stringify(aggregateProduction(q)));
+  const on = createPanelHandler({ token, dataDir: dir, timezone: 'America/Sao_Paulo', keywords: ['natal'], now: () => now,
+    production: { map, historyLoader: async () => [], filas: true, embalagem: { dir: packDir } } });
+  jar = '';
+  await request(on, base + '/embalar');
+  for (const [field, value] of [['c', '2611245C1JRNTR'], ['k', 'shopee|Principal|2611245C1JRNTR']] as const) {
+    const page = (await request(on, base + '/embalar', 'POST', [[field, value]])).body;
+    assert.doesNotMatch(page, /ainda não tem roteiro/);
+    assert.match(page, /Colocou 1× Chaveiro Clicável Brawl Stars\?/);
+    assert.match(page, /✅ Pedido embalado/);
+  }
+});
+
+test('histórico permanente: todo aparelho vê quem embalou e quem desfez, mesmo depois que o pedido sai da fila', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'hist-'));
+  const packDir = await mkdtemp(join(tmpdir(), 'hist-pack-'));
+  t.after(() => Promise.all([dir, packDir].map(d => rm(d, { recursive: true, force: true }))));
+  const write = async (orders: ReturnType<typeof order>[]) => {
+    const q = queueOf(...orders);
+    await writeFile(join(dir, 'production-queue.json'), JSON.stringify(q));
+    await writeFile(join(dir, 'production-summary.json'), JSON.stringify(aggregateProduction(q)));
+  };
+  await write([order('H1', ['mao2'], 'Ana, Bia', 5)]);
+  let clock = now;
+  const on = createPanelHandler({ token, dataDir: dir, timezone: 'America/Sao_Paulo', keywords: ['natal'], now: () => clock,
+    production: { map, historyLoader: async () => [], filas: true, embalagem: { dir: packDir } } });
+  const key = 'shopee|Conta Teste|H1';
+  const yes: [string, string][] = [['k', key], ['q', 'peca:mao_coracao'], ['q', 'nomes'], ['q', 'peca:cordao_vermelho']];
+
+  jar = '';
+  await request(on, base + '/embalar');
+  await request(on, base + '/aparelho', 'POST', [['n', 'Marcos']]);
+  const phoneA = jar;
+  await request(on, base + '/embalado', 'POST', yes);
+  clock += 60000;
+  jar = '';
+  await request(on, base + '/embalar');
+  await request(on, base + '/aparelho', 'POST', [['n', 'Joana']]);
+  const phoneB = jar;
+  await request(on, base + '/desembalar', 'POST', [['k', key]]);
+  clock += 60000;
+  await request(on, base + '/embalado', 'POST', yes);
+
+  const events = await loadHistory(packDir);
+  assert.deepEqual(events.map(e => [e.acao, e.dispositivo?.nome]), [['embalado', 'Joana'], ['desfeito', 'Joana'], ['embalado', 'Marcos']]);
+  assert.deepEqual(events[2]!.itens, ['2× Mão Grinch coração', '2× Cordão vermelho', 'Nomes: Ana, Bia']);
+  assert.equal(events[2]!.pedido, 'FAKEH1');
+
+  // O pedido foi coletado e saiu da fila; o histórico continua visível em qualquer aparelho.
+  await write([]);
+  clock += 40 * 86400000;
+  for (const cookie of [phoneA, phoneB, '']) {
+    jar = cookie;
+    const page = (await request(on, base + '/embalar?ver=historico')).body;
+    assert.match(page, /✅ Embalado<\/strong> · <b class="pedido">FAKEH1<\/b> · por Joana/);
+    assert.match(page, /↩️ Desfeito<\/strong> · <b class="pedido">FAKEH1<\/b> · por Joana/);
+    assert.match(page, /✅ Embalado<\/strong> · <b class="pedido">FAKEH1<\/b> · por Marcos/);
+    assert.match(page, /2× Mão Grinch coração · 2× Cordão vermelho · Nomes: Ana, Bia/);
+  }
+  jar = phoneA;
+  assert.match((await request(on, base + '/embalar?ver=historico&q=h1')).body, /FAKEH1/);
+  assert.doesNotMatch((await request(on, base + '/embalar?ver=historico&q=ZZZ')).body, /FAKEH1/);
+  assert.match((await request(on, base + '/embalar?ver=historico&q=<x>')).body, /value="&lt;x&gt;"/);
+  // Linha estragada no arquivo não derruba a aba.
+  await writeFile(join(packDir, 'embalagem-historico.jsonl'), '{"quebrado"\n' + (await readFile(join(packDir, 'embalagem-historico.jsonl'), 'utf8')), 'utf8');
+  assert.equal((await loadHistory(packDir)).length, 3);
+  // Sem CENTRAL_EMBALAGEM não existe aba de histórico.
+  const off = createPanelHandler({ token, dataDir: dir, timezone: 'America/Sao_Paulo', keywords: ['natal'], now: () => clock, production: { map, historyLoader: async () => [], filas: true } });
+  assert.doesNotMatch((await request(off, base + '/embalar?ver=historico')).body, /Histórico/);
 });

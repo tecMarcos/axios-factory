@@ -2,7 +2,7 @@ import type { Queue } from '../../collector/src/notifications.js';
 import { cleanText, formatRemaining, platformLabel, priorityLabels, stageLabel } from '../../collector/src/orders-view.js';
 import type { ComponentMap } from '../../production/src/component-map.js';
 import type { LiveOrder } from '../../collector/src/orders-view.js';
-import type { PackedMap } from '../../production/src/packing-store.js';
+import type { HistoryEvent, PackedMap } from '../../production/src/packing-store.js';
 import { buildPackingQueue, buildPrintQueue, itemLabel, packingChecklist, type Decision, type PackingCard, type PrintJob } from '../../production/src/workflow.js';
 import { card, esc, shell, time } from './render.js';
 
@@ -10,7 +10,7 @@ const text = (value: string | null | undefined) => esc(cleanText(value));
 type Links = { list: string; production: string; print: string; packing: string; scan?: string };
 /** Bancada com leitor: rotas de POST e o leitor de código já montado. */
 export type PackingStation = { confirm: string; undo: string; rename: string; device: { id: string; nome?: string }; scanner: { html: string; script: string } };
-type Options = { all?: boolean; view?: string | null; now: number; nonce: string; links: Links; envLabel?: string; healthBar?: string; healthCss?: string; refreshSeconds?: number; timezone?: string; packed?: PackedMap; station?: PackingStation };
+type Options = { history?: HistoryEvent[]; historyQuery?: string; all?: boolean; view?: string | null; now: number; nonce: string; links: Links; envLabel?: string; healthBar?: string; healthCss?: string; refreshSeconds?: number; timezone?: string; packed?: PackedMap; station?: PackingStation };
 
 const css = `
 .wf{overflow-wrap:anywhere}
@@ -34,8 +34,9 @@ const css = `
 .wf .names{font-size:22px;font-weight:700;margin:4px 0 0}
 .wf .done{font-size:22px;font-weight:bold;border-radius:12px;padding:14px;margin:8px 0}
 .wf form.inline{display:inline}
-.wf .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 4px}
-.wf .tabs a{flex:1;text-align:center}
+.wf .tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:14px 0 4px}
+.wf .tabs a{text-align:center;overflow-wrap:normal;word-break:normal}
+.wf .pedido{font-family:ui-monospace,monospace}
 .wf .tabs a[aria-current="page"]{outline:3px solid var(--ok);outline-offset:1px}
 .wf .photos{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
 .wf .photos img,.wf .photos .noimg{width:88px;height:88px;border-radius:10px;object-fit:cover;background:var(--bg);display:grid;place-items:center;font-size:30px}
@@ -46,6 +47,12 @@ const css = `
 .wf .device input{flex:1;min-width:140px;font-size:16px;padding:8px;border:1px solid var(--line);border-radius:8px}
 .wf .devid{font-family:ui-monospace,monospace;font-weight:bold;letter-spacing:1px}
 .wf .who{font-size:14px}
+.wf .hist{list-style:none;padding:0;margin:0}
+.wf .hist li{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;margin:6px 0}
+.wf .hist .undone{opacity:.75;border-style:dashed}
+.wf .hist small{display:block;color:var(--muted)}
+.wf form.search{display:flex;gap:6px;margin:8px 0}
+.wf form.search input{flex:1;font-size:16px;padding:8px;border:1px solid var(--line);border-radius:8px}
 .wf details.scanner summary{cursor:pointer;font-weight:bold;font-size:18px;margin:10px 0}
 `;
 
@@ -180,7 +187,28 @@ function stationCard(c: PackingCard, map: ComponentMap, o: Options, st: PackingS
   </article>`;
 }
 
-const stationViews = ['fila', 'travados', 'embalados'] as const;
+/** Histórico permanente de embalagens, de qualquer aparelho, agrupado por dia. */
+function historyView(o: Options, st: PackingStation) {
+  const tz = o.timezone ?? 'America/Sao_Paulo';
+  const q = cleanText(o.historyQuery).toUpperCase();
+  const events = (o.history ?? []).filter(e => !q || e.pedido.toUpperCase().includes(q) || (e.dispositivo?.nome ?? '').toUpperCase().includes(q) || (e.dispositivo?.id ?? '').includes(q));
+  const day = (iso: string) => new Intl.DateTimeFormat('pt-BR', { timeZone: tz, weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(iso));
+  let current = '';
+  const rows = events.slice(0, 500).map(e => {
+    const d = day(e.em);
+    const header = d !== current ? `</ul><h2>${esc(d)}</h2><ul class="hist">` : '';
+    current = d;
+    const by = e.dispositivo ? ` · por ${e.dispositivo.nome ? `${text(e.dispositivo.nome)} · ` : ''}<span class="devid">${esc(e.dispositivo.id)}</span>` : '';
+    return `${header}<li${e.acao === 'desfeito' ? ' class="undone"' : ''}><strong>${esc(time(Date.parse(e.em), tz))} · ${e.acao === 'embalado' ? '✅ Embalado' : '↩️ Desfeito'}</strong> · <b class="pedido">${text(e.pedido)}</b>${by}
+      ${e.itens.length ? `<small>${e.itens.map(text).join(' · ')}</small>` : ''}</li>`;
+  }).join('');
+  return `<form class="search" method="get" action="${esc(o.links.packing)}"><input type="hidden" name="ver" value="historico">
+      <input name="q" value="${esc(o.historyQuery ?? '')}" maxlength="60" placeholder="Buscar pedido, nome ou ID do aparelho" aria-label="Buscar no histórico"><button type="submit">Buscar</button></form>
+    <p class="muted">Tudo o que foi embalado ou desfeito, por qualquer aparelho. Nada é apagado daqui.</p>
+    ${rows ? `<ul class="hist">${rows}</ul>` : '<p>Nada no histórico ainda.</p>'}${events.length > 500 ? '<p class="muted">Mostrando os 500 mais recentes. Use a busca.</p>' : ''}`;
+}
+
+const stationViews = ['fila', 'travados', 'embalados', 'historico'] as const;
 
 /** Bancada: leitor no topo e três abas — falta embalar, não enviar, embalados. */
 function renderStation(queue: Queue, map: ComponentMap, o: Options, st: PackingStation) {
@@ -189,7 +217,8 @@ function renderStation(queue: Queue, map: ComponentMap, o: Options, st: PackingS
   const view = stationViews.find(v => v === o.view) ?? 'fila';
   const tab = (v: typeof stationViews[number], label: string, n: number) =>
     `<a class="btn${view === v ? '' : ' ghost'}" href="${esc(o.links.packing)}${v === 'fila' ? '' : `?ver=${v}`}"${view === v ? ' aria-current="page"' : ''}>${label} (${n})</a>`;
-  const body = view === 'fila'
+  const body = view === 'historico' ? historyView(o, st)
+    : view === 'fila'
     ? (pending.map((c, i) => stationCard(c, map, o, st, 'fila', i === 0)).join('') || '<p>Nada para embalar agora. 🎉</p>')
     : view === 'travados'
       ? (travados.map(c => stationCard(c, map, o, st, 'travado')).join('') || '<p>Nenhum pedido travado.</p>')
@@ -200,7 +229,7 @@ function renderStation(queue: Queue, map: ComponentMap, o: Options, st: PackingS
     <details class="scanner"${view === 'fila' ? ' open' : ''}><summary>📷 Bipar etiqueta</summary>
     ${st.scanner.html}</details>
     <p class="muted">Bipe a etiqueta ou escolha um pedido na lista. Depois responda "Sim" em todas as perguntas.</p>
-    <nav class="tabs">${tab('fila', 'Falta embalar', pending.length)}${tab('travados', 'Não enviar', travados.length)}${tab('embalados', 'Embalados', embaladosAqui.length + aguardandoColeta.length)}</nav>
+    <nav class="tabs">${tab('fila', 'Falta embalar', pending.length)}${tab('travados', 'Não enviar', travados.length)}${tab('embalados', 'Embalados', embaladosAqui.length + aguardandoColeta.length)}<a class="btn${view === 'historico' ? '' : ' ghost'}" href="${esc(o.links.packing)}?ver=historico"${view === 'historico' ? ' aria-current="page"' : ''}>🗂️ Histórico</a></nav>
     ${body}`, false, st.scanner.script);
 }
 
