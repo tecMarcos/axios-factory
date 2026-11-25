@@ -22,23 +22,19 @@ export const maskCode = (s: string) => { const c = normalizeCode(s); return c.le
 
 type Paths = { list: string; scan: string; lib: string };
 
-export function renderScanPage(o: { nonce: string; paths: Paths; auto: boolean }) {
-  return shell({
-    title: 'Bipar', nonce: o.nonce,
-    body: `
-<div class="top"><div class="titlebar"><h1>Bipar etiqueta ou nota</h1><a class="btn ghost" href="${esc(o.paths.list)}">Lista</a></div>
-<div class="muted">Aponte para o código de barras ou QR code da etiqueta ou da DANFE.</div></div>
-<main>
-  <div class="viewer"><video id="cam" muted playsinline></video><div class="aim"></div><div class="hint" id="hint">Toque em “Ligar câmera”</div></div>
+/** Câmera + campo manual; o código lido vai por POST para `action` (nunca na URL). */
+export function scannerWidget(o: { action: string; lib: string; auto: boolean }) {
+  return {
+    html: `  <div class="viewer"><video id="cam" muted playsinline></video><div class="aim"></div><div class="hint" id="hint">Toque em “Ligar câmera”</div></div>
   <button type="button" class="btn big" id="start">📷 Ligar câmera</button>
-  <form method="post" action="${esc(o.paths.scan)}" id="f" class="manual" autocomplete="off">
+  <form method="post" action="${esc(o.action)}" id="f" class="manual" autocomplete="off">
     <input name="c" id="c" inputmode="text" maxlength="300" placeholder="ou digite / use um leitor USB" aria-label="Código">
     <button class="btn" type="submit">Buscar</button>
   </form>
-</main>`,
+`,
     script: `
 (function () {
-  var NONCE = document.currentScript.nonce, LIB = ${JSON.stringify(o.paths.lib)}, AUTO = ${o.auto ? 'true' : 'false'};
+  var NONCE = document.currentScript.nonce, LIB = ${JSON.stringify(o.lib)}, AUTO = ${o.auto ? 'true' : 'false'};
   var video = document.getElementById('cam'), form = document.getElementById('f'), input = document.getElementById('c');
   var hint = document.getElementById('hint'), startBtn = document.getElementById('start'), stream = null, busy = false;
   if (!('ontouchstart' in window)) input.focus();
@@ -82,6 +78,19 @@ export function renderScanPage(o: { nonce: string; paths: Paths; auto: boolean }
   var remembered = false; try { remembered = localStorage.getItem('axf-cam') === '1'; } catch (e) {}
   if (AUTO || remembered) start();
 })();`,
+  };
+}
+
+export function renderScanPage(o: { nonce: string; paths: Paths; auto: boolean }) {
+  const scanner = scannerWidget({ action: o.paths.scan, lib: o.paths.lib, auto: o.auto });
+  return shell({
+    title: 'Bipar', nonce: o.nonce,
+    body: `
+<div class="top"><div class="titlebar"><h1>Bipar etiqueta ou nota</h1><a class="btn ghost" href="${esc(o.paths.list)}">Lista</a></div>
+<div class="muted">Aponte para o código de barras ou QR code da etiqueta ou da DANFE.</div></div>
+<main>
+${scanner.html}</main>`,
+    script: scanner.script,
   });
 }
 

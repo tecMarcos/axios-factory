@@ -1,0 +1,15 @@
+# Bancada de embalagem (opcional). Soma ao docker-compose.panel.yml, sem alterá-lo:
+#   sudo install -d -m 0700 -o 1000 -g 1000 /opt/axios-factory-runtime/embalagem
+#   sudo docker compose -f docker-compose.panel.yml -f docker-compose.embalagem.yml --env-file /opt/axios-factory-runtime/panel.env up -d
+# Liga /producao, /impressao e /embalar com leitor de etiqueta e "Pedido embalado".
+# O registro fica só em /opt/axios-factory-runtime/embalagem/embalagem.json (não vai ao UpSeller);
+# a pasta de dados do coletor continua somente leitura.
+services:
+  panel:
+    environment:
+      CENTRAL_PRODUCAO: "1"
+      CENTRAL_PRODUCAO_FILAS: "1"
+      CENTRAL_EMBALAGEM: "1"
+      PACKING_DIR: /embalagem
+    volumes:
+      - /opt/axios-factory-runtime/embalagem:/embalagem

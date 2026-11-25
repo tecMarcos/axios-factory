@@ -15,15 +15,17 @@ import { defaultComponentMapPath, loadComponentMap, type ComponentMap } from '..
 import { loadSyncHistory, type History } from '../../production/src/sync-health.js';
 import { renderProduction } from './render-production.js';
 import { renderPacking, renderPrintQueue } from './render-workflow.js';
-import { decisionsFor } from '../../production/src/workflow.js';
+import { decisionsFor, packingCards, packingChecklist } from '../../production/src/workflow.js';
+import { loadPacked, markPacked, orderKey, unmarkPacked, validPackingDir, type PackedMap } from '../../production/src/packing-store.js';
+import { renderPackingDone, renderPackingScan } from './render-workflow.js';
 import { healthCss } from './render.js';
 import { renderPanel } from './render.js';
-import { findOrders, renderScanPage, renderScanResult } from './scan.js';
+import { findOrders, renderScanPage, renderScanResult, scannerWidget } from './scan.js';
 
 type HealthReader<T> = (dir: string) => Promise<T | null> | T | null;
 const readMonitor = <T>(dir: string, read: HealthReader<T>) => Promise.resolve().then(() => read(dir)).catch(() => null);
 
-export type PanelConfig = { token: string; dataDir: string; timezone: string; keywords: string[]; scanSecret?: string; now?: () => number; scannerLibPath?: string; health?: { config: Partial<HealthConfig>; readHealth?: HealthReader<Health>; readNotify?: HealthReader<NotifyHealth> }; production?: { map: ComponentMap; historyLoader?: (dataDir: string) => Promise<History[]>; envLabel?: string; filas?: boolean } };
+export type PanelConfig = { token: string; dataDir: string; timezone: string; keywords: string[]; scanSecret?: string; now?: () => number; scannerLibPath?: string; health?: { config: Partial<HealthConfig>; readHealth?: HealthReader<Health>; readNotify?: HealthReader<NotifyHealth> }; production?: { map: ComponentMap; historyLoader?: (dataDir: string) => Promise<History[]>; envLabel?: string; filas?: boolean; embalagem?: { dir: string } } };
 
 export async function loadSnapshot(dir: string) { return (await readSnapshot(dir)).queue; }
 
@@ -65,9 +67,13 @@ export function createPanelHandler(config: PanelConfig) {
     const base = `/p/${match[1]}`, sub = match[2] ?? '';
     const paths = { list: base, scan: `${base}/bipar`, lib: `${base}/leitor.js` };
     const filas = config.production?.filas === true;
-    const workflowLinks = { list: base, production: `${base}/producao`, print: `${base}/impressao`, packing: `${base}/embalar`, scan: paths.scan };
-    const allowed = sub === '/bipar' ? ['GET', 'HEAD', 'POST'] : ['GET', 'HEAD'];
-    if (!['', '/bipar', '/leitor.js'].includes(sub) && !(sub === '/producao' && config.production) && !((sub === '/impressao' || sub === '/embalar') && filas) && !(sub === '/saude.json' && config.health)) return send(res, 404, 'Não encontrado');
+    // Bancada com leitor e "pedido embalado": só com CENTRAL_EMBALAGEM=1 (exige as filas).
+    const packingDir = filas ? config.production?.embalagem?.dir : undefined;
+    const stationPaths = { confirm: `${base}/embalado`, undo: `${base}/desembalar` };
+    const workflowLinks = { list: base, production: `${base}/producao`, print: `${base}/impressao`, packing: `${base}/embalar`, ...(packingDir ? {} : { scan: paths.scan }) };
+    const stationPost = packingDir !== undefined && (sub === '/embalado' || sub === '/desembalar');
+    const allowed = sub === '/bipar' || (sub === '/embalar' && packingDir) ? ['GET', 'HEAD', 'POST'] : stationPost ? ['POST'] : ['GET', 'HEAD'];
+    if (!['', '/bipar', '/leitor.js'].includes(sub) && !(sub === '/producao' && config.production) && !((sub === '/impressao' || sub === '/embalar') && filas) && !stationPost && !(sub === '/saude.json' && config.health)) return send(res, 404, 'Não encontrado');
     if (!allowed.includes(req.method ?? '')) return send(res, 405, 'Método não permitido', { Allow: allowed.join(', ') });
 
     if (sub === '/leitor.js') {
@@ -82,9 +88,11 @@ export function createPanelHandler(config: PanelConfig) {
     }
 
     let scanned: string | undefined;
+    let form: URLSearchParams | undefined;
     if (req.method === 'POST') {
       // Codes travel in the POST body so they never land in proxy access logs.
-      try { scanned = (await readForm(req)).get('c')?.slice(0, 300) ?? ''; } catch { return send(res, 400, 'Pedido inválido'); }
+      try { form = await readForm(req); } catch { return send(res, 400, 'Pedido inválido'); }
+      if (sub === '/bipar') scanned = form.get('c')?.slice(0, 300) ?? '';
     }
     const queue = await loadSnapshot(config.dataDir).catch(() => null);
     if (!queue && sub !== '/saude.json') {
@@ -93,7 +101,7 @@ export function createPanelHandler(config: PanelConfig) {
     }
     const t = now();
     let healthBar: string | undefined;
-    if (config.health && scanned === undefined) {
+    if (config.health && scanned === undefined && !form) {
       const [health, notify] = await Promise.all([
         readMonitor(config.dataDir, config.health.readHealth ?? readHealth),
         readMonitor(config.dataDir, config.health.readNotify ?? readNotifyHealth),
@@ -111,12 +119,54 @@ export function createPanelHandler(config: PanelConfig) {
     if (scanned !== undefined) {
       const matches = findOrders(queue, scanned, config.scanSecret, t);
       console.log(JSON.stringify({ event: 'panel_scan', matched: matches.length }));
-      const decisions = filas && config.production ? decisionsFor({ ...queue, orders: matches }, config.production.map, t) : undefined;
+      const packedNow = packingDir ? await loadPacked(packingDir).catch(() => undefined) : undefined;
+      const decisions = filas && config.production ? decisionsFor({ ...queue, orders: matches }, config.production.map, t, packedNow) : undefined;
       return html(res, renderScanResult({ nonce, paths, scanned, matches, timezone: config.timezone, personalizationKeywords: config.keywords, decisions }), nonce);
     }
-    if ((sub === '/impressao' || sub === '/embalar') && filas && config.production) {
-      const options = { now: t, nonce, links: workflowLinks, envLabel: config.production.envLabel, healthBar, healthCss, refreshSeconds: 120 };
-      return html(res, sub === '/impressao' ? renderPrintQueue(queue, config.production.map, options) : renderPacking(queue, config.production.map, options), nonce);
+    if ((sub === '/impressao' || sub === '/embalar' || stationPost) && filas && config.production) {
+      const { map } = config.production;
+      let packed: PackedMap = new Map();
+      if (packingDir) {
+        try { packed = await loadPacked(packingDir); }
+        catch { console.error(JSON.stringify({ event: 'packing_unavailable' })); return send(res, 503, 'Não consegui ler as embalagens. Tente de novo.', { 'Retry-After': '30' }); }
+      }
+      const station = packingDir ? { ...stationPaths, scanner: scannerWidget({ action: `${base}/embalar`, lib: paths.lib, auto: url.searchParams.get('auto') === '1' }) } : undefined;
+      const options = { now: t, nonce, links: workflowLinks, envLabel: config.production.envLabel, healthBar, healthCss, refreshSeconds: 120, timezone: config.timezone, packed, station };
+      const nextHref = `${base}/embalar?auto=1`;
+      if (station && sub === '/embalar' && form) {
+        const matches = findOrders(queue, form.get('c')?.slice(0, 300) ?? '', config.scanSecret, t);
+        console.log(JSON.stringify({ event: 'pack_scan', matched: matches.length }));
+        const cards = new Map(packingCards({ ...queue, orders: matches }, map, t, packed).map(c => [c.key, c]));
+        return html(res, renderPackingScan(map, { scanned: '', matches, cards, keyOf: orderKey, nextHref, personalizationKeywords: config.keywords }, { ...options, station }), nonce);
+      }
+      if (station && form && stationPost) {
+        const key = form.get('k')?.slice(0, 300) ?? '';
+        const card = packingCards(queue, map, t, packed).find(c => c.key === key);
+        const done = (status: number, ok: boolean, title: string, detail?: string) =>
+          html(res, renderPackingDone(options, { ok, title, detail, nextHref }), nonce, status);
+        if (!card) return done(404, false, 'Pedido não encontrado na lista atual', 'Bipe a etiqueta de novo.');
+        try {
+          if (sub === '/desembalar') {
+            if (!packed.has(key)) return done(409, false, 'Este pedido não estava marcado como embalado');
+            await unmarkPacked(packingDir!, key, t);
+            console.log(JSON.stringify({ event: 'pack_undone' }));
+            return done(200, true, `Embalagem desfeita: ${card.displayId}`, 'O pedido voltou para a fila.');
+          }
+          if (card.decision.status === 'ja_embalado') return done(409, false, `${card.displayId} já está embalado`);
+          if (card.decision.status !== 'pode_enviar') return done(409, false, `⛔ Não embale ${card.displayId}`, card.decision.motivo);
+          const answered = new Set(form.getAll('q'));
+          const checks = packingChecklist(card, map);
+          const missing = checks.filter(q => !answered.has(q.id));
+          if (missing.length) return done(422, false, 'Faltou responder "Sim"', missing.map(q => q.pergunta).join(' · '));
+          await markPacked(packingDir!, key, checks.map(q => q.id), t);
+          console.log(JSON.stringify({ event: 'pack_marked', checks: checks.length }));
+          return done(200, true, `✅ ${card.displayId} embalado`, 'Pode colar a etiqueta e separar para a coleta.');
+        } catch {
+          console.error(JSON.stringify({ event: 'packing_write_failed' }));
+          return done(500, false, 'Não consegui salvar. Tente de novo.');
+        }
+      }
+      return html(res, sub === '/impressao' ? renderPrintQueue(queue, map, options) : renderPacking(queue, map, options), nonce);
     }
     if (sub === '/producao' && config.production) {
       const { map, historyLoader = loadSyncHistory, envLabel } = config.production;
@@ -149,7 +199,8 @@ export function startPanel(env: NodeJS.ProcessEnv = process.env) {
     scanSecret: validScanSecret(env.SCAN_KEY),
     ...(env.HEALTH_MONITOR === '1' ? { health: { config: healthConfigFromEnv(env) } } : {}),
     ...(env.CENTRAL_PRODUCAO === '1' ? {
-      production: { map: loadComponentMap(env.COMPONENT_MAP_PATH ?? defaultComponentMapPath), envLabel: env.PANEL_ENV_LABEL, filas: env.CENTRAL_PRODUCAO_FILAS === '1' },
+      production: { map: loadComponentMap(env.COMPONENT_MAP_PATH ?? defaultComponentMapPath), envLabel: env.PANEL_ENV_LABEL, filas: env.CENTRAL_PRODUCAO_FILAS === '1',
+        ...(env.CENTRAL_EMBALAGEM === '1' ? { embalagem: { dir: validPackingDir(env.PACKING_DIR) } } : {}) },
     } : {}),
   });
   const port = Number(env.PANEL_PORT ?? 3100), host = env.PANEL_HOST ?? '127.0.0.1';
