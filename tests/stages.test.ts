@@ -186,3 +186,17 @@ test('painel: flag desligada mantém a Produção antiga; ligada mostra "O que i
   assert.equal(raw.trim().split('\n').length, 3);
   assert.match(raw, new RegExp(`"id":"${jar.split('=')[1]!.split('~')[0]}"`));
 });
+
+test('foto: cada pedido mostra a foto do anúncio; o grupo usa a de um kit só daquela peça', async () => {
+  const withImg = (o: ReturnType<typeof order>, img: string) => ({ ...o, orderItemList: o.orderItemList.map(i => ({ ...i, productImg: img })) });
+  const q = queueOf(withImg(order('MIX', ['mix'], null, 2), 'https://img.test/misto.jpg'), withImg(order('B', ['bisc'], null, 8), 'https://img.test/biscoito.jpg'));
+  const board = buildStageBoard(q, map, now, new Map());
+  assert.deepEqual(board.byStage.imprimir.map(p => `${p.card.displayId}:${p.componentId}:${p.unica}`), ['FAKEMIX:biscoito:false', 'FAKEMIX:elfo:false', 'FAKEB:biscoito:true']);
+  const { renderStageBoard } = await import('../apps/panel/src/render-stages.js');
+  const html = renderStageBoard(q, map, new Map(), new Map(), { now, nonce: 'n', timezone: 'America/Sao_Paulo', device: dev,
+    paths: { board: '/b', mark: '/m', undo: '/u', rename: '/r', list: '/l', packing: '/e', print: '/i', details: '/d' } });
+  const biscoitoGroup = html.slice(html.indexOf('Biscoito natalino') - 400, html.indexOf('Biscoito natalino'));
+  assert.match(biscoitoGroup, /<img src="https:\/\/img\.test\/biscoito\.jpg"/, 'grupo do biscoito usa a foto do kit só de biscoito');
+  assert.match(html, /class="thumb" src="https:\/\/img\.test\/misto\.jpg"/, 'o pedido misto mostra a própria foto');
+  assert.doesNotMatch(html, /🎄/);
+});

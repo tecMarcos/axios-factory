@@ -100,6 +100,8 @@ export async function loadStageHistory(dir: string, limit = 300): Promise<StageE
 export type Piece = {
   piece: string; card: PackingCard; componentId: string; nome: string; quantidade: number; nomes: string[];
   etapas: StageId[]; feitas: number; proxima: StageId | null; foto: string | null;
+  /** O pedido só tem esta peça para produzir (a foto do anúncio mostra exatamente ela). */
+  unica: boolean;
 };
 
 /**
@@ -122,9 +124,10 @@ export function buildStageBoard(queue: Queue, map: ComponentMap, now: number, st
       const piece = pieceKey(card.key, componentId);
       const feitas = Math.min(state.get(piece)?.feitas ?? 0, etapas.length);
       const nomes = map.componentes[componentId]!.personalizado && personalized.length === 1 ? card.nameValidation.names : [];
-      own.push({ piece, card, componentId, nome: map.componentes[componentId]!.nome, quantidade, nomes, etapas, feitas, proxima: etapas[feitas] ?? null, foto });
+      own.push({ piece, card, componentId, nome: map.componentes[componentId]!.nome, quantidade, nomes, etapas, feitas, proxima: etapas[feitas] ?? null, foto, unica: false });
     }
     if (!own.length) continue;
+    if (own.length === 1) own[0]!.unica = true;
     pieces.push(...own);
     (own.every(p => p.proxima === null) ? prontos : emProducao).push(card);
   }

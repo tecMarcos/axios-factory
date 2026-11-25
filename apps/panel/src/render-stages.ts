@@ -33,6 +33,7 @@ const css = `
 .pb .row{display:flex;gap:10px;align-items:flex-start;border-top:1px solid var(--line);padding:10px 0}
 .pb .row input[type=checkbox]{width:30px;height:30px;flex:none;margin-top:2px}
 .pb .row label{flex:1;display:block}
+.pb .row .thumb{width:52px;height:52px;border-radius:8px;object-fit:cover;flex:none;background:var(--bg)}
 .pb .undorow{padding:0 0 8px 40px;margin-top:-6px}
 .pb .qty{font-size:22px;font-weight:800}
 .pb .chip{display:inline-block;border-radius:999px;padding:2px 10px;font-size:13px;font-weight:700;color:#fff;margin-right:4px}
@@ -69,7 +70,7 @@ function pieceRow(p: Piece, withCheckbox: boolean) {
   const undo = p.feitas > 0
     ? `<button class="undo" type="submit" formaction="__UNDO__" name="v" value="${esc(p.piece)}">↩ voltar para ${esc(stageInfo[p.etapas[p.feitas - 1]!].nome.toLowerCase())}</button>` : '';
   return `<div class="row">${withCheckbox ? `<input type="checkbox" name="p" value="${esc(p.piece)}" id="${id}">` : ''}
-    <label for="${id}"><span class="qty">${p.quantidade}×</span> ${deadlineChip(c)}
+    ${p.foto ? `<img class="thumb" src="${esc(p.foto)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<label for="${id}"><span class="qty">${p.quantidade}×</span> ${deadlineChip(c)}
       <div class="small">${text(c.displayId)} · ${text(platformLabel(c.platform))}${c.account ? ` · ${text(c.account)}` : ''}</div>
       ${names}${stepsBar(p)}</label></div>${undo ? `<div class="undorow">${undo}</div>` : ''}`;
 }
@@ -84,7 +85,10 @@ function stageView(stage: StageId, pieces: Piece[], o: StageOptions) {
     const allNames = list.flatMap(p => p.nomes);
     const copy = stage === 'nomes' && allNames.length
       ? `<button type="button" class="btn copy" data-copy="${esc(allNames.map(n => cleanText(n)).join('\n'))}">📋 Copiar ${allNames.length} nomes</button>` : '';
-    return `<section class="group"><div class="ghead">${photo(list[0]!.foto)}<div><div class="big">${total} ${stage === 'nomes' ? 'nomes' : 'peças'}</div>
+    // Foto do grupo: de preferência de um pedido que só tem esta peça (ex.: Kit 4 Biscoitos, não o misto).
+    const pure = list.find(p => p.foto && p.unica);
+    const groupPhoto = (pure ?? list.find(p => p.foto))?.foto ?? null;
+    return `<section class="group"><div class="ghead">${photo(groupPhoto)}<div><div class="big">${total} ${stage === 'nomes' ? 'nomes' : 'peças'}</div>
       <div>${text(list[0]!.nome)}</div></div></div>${copy}
       ${list.map(p => pieceRow(p, true)).join('')}</section>`;
   }).join('');
