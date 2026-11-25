@@ -54,7 +54,7 @@ export async function loadPacked(dir: string): Promise<PackedMap> {
 
 // Um painel só grava neste arquivo; a fila garante uma escrita por vez.
 const chains = new Map<string, Promise<unknown>>();
-function serialize<T>(dir: string, action: () => Promise<T>): Promise<T> {
+export function serialize<T>(dir: string, action: () => Promise<T>): Promise<T> {
   const run = (chains.get(dir) ?? Promise.resolve()).catch(() => {}).then(action);
   chains.set(dir, run);
   return run;

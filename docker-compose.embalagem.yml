@@ -4,6 +4,8 @@
 # Liga /producao, /impressao e /embalar com leitor de etiqueta e "Pedido embalado".
 # O registro fica só em /opt/axios-factory-runtime/embalagem/embalagem.json (não vai ao UpSeller);
 # a pasta de dados do coletor continua somente leitura.
+# CENTRAL_ETAPAS: Produção vira quadro de etapas (imprimir, nomes 3D, colar, separar);
+# grava só em /embalagem/producao.json. Para voltar à Produção antiga, troque para "0".
 services:
   panel:
     environment:
@@ -11,5 +13,6 @@ services:
       CENTRAL_PRODUCAO_FILAS: "1"
       CENTRAL_EMBALAGEM: "1"
       PACKING_DIR: /embalagem
+      CENTRAL_ETAPAS: "1"
     volumes:
       - /opt/axios-factory-runtime/embalagem:/embalagem

@@ -12,7 +12,7 @@ type Links = { list: string; production: string; print: string; packing: string;
 export type PackingStation = { confirm: string; undo: string; rename: string; device: { id: string; nome?: string }; scanner: { html: string; script: string } };
 type Options = { history?: HistoryEvent[]; historyQuery?: string; all?: boolean; view?: string | null; now: number; nonce: string; links: Links; envLabel?: string; healthBar?: string; healthCss?: string; refreshSeconds?: number; timezone?: string; packed?: PackedMap; station?: PackingStation };
 
-const css = `
+export const workflowCss = `
 .wf{overflow-wrap:anywhere}
 .wf h2{font-size:18px;margin:22px 0 8px}
 .wf .nav{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
@@ -71,7 +71,7 @@ function nav(l: Links) {
 function page(title: string, o: Options, body: string, refresh: boolean, script?: string) {
   return shell({
     title, nonce: o.nonce, noScript: script === undefined, script, refreshSeconds: refresh ? o.refreshSeconds : undefined,
-    extraHead: `<style nonce="${esc(o.nonce)}">${css}${o.healthBar && o.healthCss ? o.healthCss : ''}</style>`,
+    extraHead: `<style nonce="${esc(o.nonce)}">${workflowCss}${o.healthBar && o.healthCss ? o.healthCss : ''}</style>`,
     body: `<main class="wf">
       <div class="titlebar"><h1>${esc(title)}</h1></div>
       ${nav(o.links)}
@@ -159,7 +159,7 @@ export function packedBy(d: Decision) {
   return ` <span class="who">por ${d.dispositivo.nome ? `${text(d.dispositivo.nome)} · ` : ''}<span class="devid">${esc(d.dispositivo.id)}</span></span>`;
 }
 
-function deviceBox(st: PackingStation) {
+export function deviceBox(st: Pick<PackingStation, 'device' | 'rename'>) {
   return `<form class="device" method="post" action="${esc(st.rename)}" autocomplete="off">
     <span>📱 Este aparelho: <span class="devid">${esc(st.device.id)}</span></span>
     <input name="n" maxlength="30" value="${esc(st.device.nome ?? '')}" placeholder="Seu nome (ex.: Marcos)" aria-label="Nome de quem usa este aparelho">

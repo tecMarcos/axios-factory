@@ -18,6 +18,8 @@ import { renderPacking, renderPrintQueue } from './render-workflow.js';
 import { decisionsFor, orderLines, packingCards, packingChecklist } from '../../production/src/workflow.js';
 import { cleanDeviceName, deviceIdPattern, loadHistory, loadPacked, markPacked, orderKey, unmarkPacked, validPackingDir, type Device, type PackedMap } from '../../production/src/packing-store.js';
 import { renderPackingDone, renderPackingScan } from './render-workflow.js';
+import { renderStageBoard, renderStageDone } from './render-stages.js';
+import { applyStages, buildStageBoard, loadStageHistory, loadStages, stageIds, stageInfo, type Piece, type StageId } from '../../production/src/stages.js';
 import { healthCss } from './render.js';
 import { renderPanel } from './render.js';
 import { findOrders, renderScanPage, renderScanResult, scannerWidget } from './scan.js';
@@ -25,7 +27,7 @@ import { findOrders, renderScanPage, renderScanResult, scannerWidget } from './s
 type HealthReader<T> = (dir: string) => Promise<T | null> | T | null;
 const readMonitor = <T>(dir: string, read: HealthReader<T>) => Promise.resolve().then(() => read(dir)).catch(() => null);
 
-export type PanelConfig = { token: string; dataDir: string; timezone: string; keywords: string[]; scanSecret?: string; now?: () => number; scannerLibPath?: string; health?: { config: Partial<HealthConfig>; readHealth?: HealthReader<Health>; readNotify?: HealthReader<NotifyHealth> }; production?: { map: ComponentMap; historyLoader?: (dataDir: string) => Promise<History[]>; envLabel?: string; filas?: boolean; embalagem?: { dir: string } } };
+export type PanelConfig = { token: string; dataDir: string; timezone: string; keywords: string[]; scanSecret?: string; now?: () => number; scannerLibPath?: string; health?: { config: Partial<HealthConfig>; readHealth?: HealthReader<Health>; readNotify?: HealthReader<NotifyHealth> }; production?: { map: ComponentMap; historyLoader?: (dataDir: string) => Promise<History[]>; envLabel?: string; filas?: boolean; embalagem?: { dir: string }; etapas?: boolean } };
 
 export async function loadSnapshot(dir: string) { return (await readSnapshot(dir)).queue; }
 
@@ -76,7 +78,7 @@ export function createPanelHandler(config: PanelConfig) {
     const url = new URL(req.url ?? '/', 'http://panel');
     const path = url.pathname;
     if (path === '/healthz') return send(res, 200, 'ok');
-    const match = /^\/p\/([^/]+)(\/[a-z.]*)?\/?$/.exec(path);
+    const match = /^\/p\/([^/]+)(\/[a-z.-]*)?\/?$/.exec(path);
     // Constant-time comparison; any wrong or missing token looks exactly like an unknown page.
     if (!match || !timingSafeEqual(digest(match[1]!), expected)) return send(res, 404, 'Não encontrado');
     const base = `/p/${match[1]}`, sub = match[2] ?? '';
@@ -87,8 +89,11 @@ export function createPanelHandler(config: PanelConfig) {
     const stationPaths = { confirm: `${base}/embalado`, undo: `${base}/desembalar` };
     const workflowLinks = { list: base, production: `${base}/producao`, print: `${base}/impressao`, packing: `${base}/embalar`, ...(packingDir ? {} : { scan: paths.scan }) };
     const stationPost = packingDir !== undefined && (sub === '/embalado' || sub === '/desembalar' || sub === '/aparelho');
-    const allowed = sub === '/bipar' || (sub === '/embalar' && packingDir) ? ['GET', 'HEAD', 'POST'] : stationPost ? ['POST'] : ['GET', 'HEAD'];
-    if (!['', '/bipar', '/leitor.js'].includes(sub) && !(sub === '/producao' && config.production) && !((sub === '/impressao' || sub === '/embalar') && filas) && !stationPost && !(sub === '/saude.json' && config.health)) return send(res, 404, 'Não encontrado');
+    // Quadro de etapas da produção: só com CENTRAL_ETAPAS=1 (grava na mesma pasta da embalagem).
+    const stagesDir = packingDir && config.production?.etapas ? packingDir : undefined;
+    const stagePost = stagesDir !== undefined && (sub === '/etapa' || sub === '/etapa-voltar');
+    const allowed = sub === '/bipar' || (sub === '/embalar' && packingDir) ? ['GET', 'HEAD', 'POST'] : stationPost || stagePost ? ['POST'] : ['GET', 'HEAD'];
+    if (!['', '/bipar', '/leitor.js'].includes(sub) && !(sub === '/producao' && config.production) && !((sub === '/impressao' || sub === '/embalar') && filas) && !stationPost && !stagePost && !(sub === '/saude.json' && config.health)) return send(res, 404, 'Não encontrado');
     if (!allowed.includes(req.method ?? '')) return send(res, 405, 'Método não permitido', { Allow: allowed.join(', ') });
 
     if (sub === '/leitor.js') {
@@ -106,7 +111,7 @@ export function createPanelHandler(config: PanelConfig) {
     let form: URLSearchParams | undefined;
     if (req.method === 'POST') {
       // Codes travel in the POST body so they never land in proxy access logs.
-      try { form = await readForm(req); } catch { return send(res, 400, 'Pedido inválido'); }
+      try { form = await readForm(req, stagePost ? 65536 : 4096); } catch { return send(res, 400, 'Pedido inválido'); }
       if (sub === '/bipar') scanned = form.get('c')?.slice(0, 300) ?? '';
     }
     const queue = await loadSnapshot(config.dataDir).catch(() => null);
@@ -207,6 +212,62 @@ export function createPanelHandler(config: PanelConfig) {
       }
       return page(sub === '/impressao' ? renderPrintQueue(queue, map, options) : renderPacking(queue, map, options));
     }
+    const stageView = req.method === 'GET' ? url.searchParams.get('ver') : null;
+    if (stagesDir && config.production && (stagePost || (sub === '/producao' && stageView !== 'detalhes'))) {
+      const { map } = config.production;
+      let packed: PackedMap, state: Awaited<ReturnType<typeof loadStages>>;
+      try { [packed, state] = await Promise.all([loadPacked(stagesDir), loadStages(stagesDir)]); }
+      catch { console.error(JSON.stringify({ event: 'stages_unavailable' })); return send(res, 503, 'Não consegui ler a produção. Tente de novo.', { 'Retry-After': '30' }); }
+      let device = readDevice(req);
+      const hadDevice = device !== null;
+      device ??= { id: newDeviceId() };
+      const cookieHeaders: Record<string, string> = hadDevice ? {} : { 'Set-Cookie': deviceCookie(device, `${base}/`, req.headers['x-forwarded-proto'] === 'https') };
+      const stageOptions = {
+        now: t, nonce, timezone: config.timezone, device, view: stageView, envLabel: config.production.envLabel, healthBar, healthCss,
+        paths: { board: `${base}/producao`, mark: `${base}/etapa`, undo: `${base}/etapa-voltar`, rename: `${base}/aparelho`, list: base, packing: `${base}/embalar`, print: `${base}/impressao`, details: `${base}/producao?ver=detalhes` },
+      };
+      const page = (body: string, status = 200) => html(res, body, nonce, status, cookieHeaders);
+      if (stagePost && form) {
+        const back = (stage?: string) => `${base}/producao${stage && stage !== 'imprimir' ? `?ver=${stage}` : ''}`;
+        const done = (status: number, ok: boolean, title: string, lines: string[] = [], stage?: string) => page(renderStageDone(stageOptions, { ok, title, lines, back: back(stage) }), status);
+        // Sem cookie de aparelho não grava: todo registro sabe quem foi.
+        if (!hadDevice) return done(428, false, 'Aparelho sem identificação', ['Abra a Produção de novo e repita. Se continuar, libere cookies para este site.']);
+        const board = buildStageBoard(queue, map, t, state, packed);
+        const change = (p: Piece, etapa: StageId) => ({ piece: p.piece, etapa, pedido: p.card.displayId, peca: p.nome, quantidade: p.quantidade, ...(etapa === 'nomes' || etapa === 'colar' ? { nomes: p.nomes } : {}) });
+        const line = (p: Piece) => `${p.quantidade}× ${p.nome} · ${p.card.displayId}${p.nomes.length ? ` · ${p.nomes.join(', ')}` : ''}`;
+        try {
+          if (sub === '/etapa-voltar') {
+            const p = board.pieces.find(x => x.piece === form!.get('v') && x.feitas > 0);
+            if (!p) return done(404, false, 'Peça não encontrada ou já voltou', [], 'imprimir');
+            const etapa = p.etapas[p.feitas - 1]!;
+            const applied = await applyStages(stagesDir, [{ change: change(p, etapa), from: p.feitas, to: p.feitas - 1 }], t, device);
+            if (!applied.length) return done(409, false, 'Outro aparelho mexeu nesta peça agora. Confira e tente de novo.', [], etapa);
+            console.log(JSON.stringify({ event: 'stage_undone', stage: etapa, device: device.id }));
+            return done(200, true, `↩ Voltou para "${stageInfo[etapa].nome}"`, [line(p)], etapa);
+          }
+          const e = form.get('e') as StageId;
+          if (!stageIds.includes(e)) return send(res, 400, 'Pedido inválido');
+          const wanted = new Set(form.getAll('p'));
+          const list = board.byStage[e].filter(p => wanted.has(p.piece));
+          if (!list.length) return done(422, false, 'Nenhuma peça marcada', ['Toque nas caixinhas das peças que ficaram prontas e depois no botão verde.'], e);
+          const applied = new Set((await applyStages(stagesDir, list.map(p => ({ change: change(p, e), from: p.feitas, to: p.feitas + 1 })), t, device)).map(c => c.piece));
+          const ok = list.filter(p => applied.has(p.piece));
+          console.log(JSON.stringify({ event: 'stage_marked', stage: e, pieces: ok.length, device: device.id }));
+          const skipped = list.length - ok.length;
+          return done(200, ok.length > 0, ok.length ? `✅ ${stageInfo[e].nome}: ${ok.reduce((n, p) => n + p.quantidade, 0)} peça(s) marcadas` : 'Nada mudou',
+            [...ok.map(line), ...(skipped ? [`${skipped} já tinham sido marcadas por outro aparelho.`] : [])], e);
+        } catch {
+          console.error(JSON.stringify({ event: 'stages_write_failed' }));
+          return done(500, false, 'Não consegui salvar. Tente de novo.', [], form.get('e') ?? undefined);
+        }
+      }
+      let history;
+      if (stageView === 'historico') {
+        try { history = await loadStageHistory(stagesDir, 500); }
+        catch { return send(res, 503, 'Não consegui ler o histórico. Tente de novo.', { 'Retry-After': '30' }); }
+      }
+      return page(renderStageBoard(queue, map, state, packed, { ...stageOptions, history }));
+    }
     if (sub === '/producao' && config.production) {
       const { map, historyLoader = loadSyncHistory, envLabel } = config.production;
       let history: History[] = [];
@@ -239,7 +300,7 @@ export function startPanel(env: NodeJS.ProcessEnv = process.env) {
     ...(env.HEALTH_MONITOR === '1' ? { health: { config: healthConfigFromEnv(env) } } : {}),
     ...(env.CENTRAL_PRODUCAO === '1' ? {
       production: { map: loadComponentMap(env.COMPONENT_MAP_PATH ?? defaultComponentMapPath), envLabel: env.PANEL_ENV_LABEL, filas: env.CENTRAL_PRODUCAO_FILAS === '1',
-        ...(env.CENTRAL_EMBALAGEM === '1' ? { embalagem: { dir: validPackingDir(env.PACKING_DIR) } } : {}) },
+        ...(env.CENTRAL_EMBALAGEM === '1' ? { embalagem: { dir: validPackingDir(env.PACKING_DIR) } } : {}), etapas: env.CENTRAL_ETAPAS === '1' },
     } : {}),
   });
   const port = Number(env.PANEL_PORT ?? 3100), host = env.PANEL_HOST ?? '127.0.0.1';
