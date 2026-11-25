@@ -14,13 +14,16 @@ import { validScanSecret } from '../../collector/src/scan-keys.js';
 import { defaultComponentMapPath, loadComponentMap, type ComponentMap } from '../../production/src/component-map.js';
 import { loadSyncHistory, type History } from '../../production/src/sync-health.js';
 import { renderProduction } from './render-production.js';
+import { renderPacking, renderPrintQueue } from './render-workflow.js';
+import { decisionsFor } from '../../production/src/workflow.js';
+import { healthCss } from './render.js';
 import { renderPanel } from './render.js';
 import { findOrders, renderScanPage, renderScanResult } from './scan.js';
 
 type HealthReader<T> = (dir: string) => Promise<T | null> | T | null;
 const readMonitor = <T>(dir: string, read: HealthReader<T>) => Promise.resolve().then(() => read(dir)).catch(() => null);
 
-export type PanelConfig = { token: string; dataDir: string; timezone: string; keywords: string[]; scanSecret?: string; now?: () => number; scannerLibPath?: string; health?: { config: Partial<HealthConfig>; readHealth?: HealthReader<Health>; readNotify?: HealthReader<NotifyHealth> }; production?: { map: ComponentMap; historyLoader?: (dataDir: string) => Promise<History[]>; envLabel?: string } };
+export type PanelConfig = { token: string; dataDir: string; timezone: string; keywords: string[]; scanSecret?: string; now?: () => number; scannerLibPath?: string; health?: { config: Partial<HealthConfig>; readHealth?: HealthReader<Health>; readNotify?: HealthReader<NotifyHealth> }; production?: { map: ComponentMap; historyLoader?: (dataDir: string) => Promise<History[]>; envLabel?: string; filas?: boolean } };
 
 export async function loadSnapshot(dir: string) { return (await readSnapshot(dir)).queue; }
 
@@ -61,8 +64,10 @@ export function createPanelHandler(config: PanelConfig) {
     if (!match || !timingSafeEqual(digest(match[1]!), expected)) return send(res, 404, 'Não encontrado');
     const base = `/p/${match[1]}`, sub = match[2] ?? '';
     const paths = { list: base, scan: `${base}/bipar`, lib: `${base}/leitor.js` };
+    const filas = config.production?.filas === true;
+    const workflowLinks = { list: base, production: `${base}/producao`, print: `${base}/impressao`, packing: `${base}/embalar`, scan: paths.scan };
     const allowed = sub === '/bipar' ? ['GET', 'HEAD', 'POST'] : ['GET', 'HEAD'];
-    if (!['', '/bipar', '/leitor.js'].includes(sub) && !(sub === '/producao' && config.production) && !(sub === '/saude.json' && config.health)) return send(res, 404, 'Não encontrado');
+    if (!['', '/bipar', '/leitor.js'].includes(sub) && !(sub === '/producao' && config.production) && !((sub === '/impressao' || sub === '/embalar') && filas) && !(sub === '/saude.json' && config.health)) return send(res, 404, 'Não encontrado');
     if (!allowed.includes(req.method ?? '')) return send(res, 405, 'Método não permitido', { Allow: allowed.join(', ') });
 
     if (sub === '/leitor.js') {
@@ -100,13 +105,18 @@ export function createPanelHandler(config: PanelConfig) {
           ({ name, ok, error, lastSuccessAt, consecutiveFailures, sessionAgeDays: sessionAgeDays(sessionStartedAt, t) })) ?? [],
         notify: (notify ?? emptyNotifyHealth()).channels, lastRunAt: health?.lastRunAt ?? null,
       }), { 'Content-Type': 'application/json; charset=utf-8' });
-      healthBar = renderHealth(alerts, health?.lastRunAt ?? null, config.timezone, sub === '/producao');
+      healthBar = renderHealth(alerts, health?.lastRunAt ?? null, config.timezone, sub === '/producao' || sub === '/impressao' || sub === '/embalar');
     }
     if (!queue) return send(res, 404, 'Não encontrado');
     if (scanned !== undefined) {
       const matches = findOrders(queue, scanned, config.scanSecret, t);
       console.log(JSON.stringify({ event: 'panel_scan', matched: matches.length }));
-      return html(res, renderScanResult({ nonce, paths, scanned, matches, timezone: config.timezone, personalizationKeywords: config.keywords }), nonce);
+      const decisions = filas && config.production ? decisionsFor({ ...queue, orders: matches }, config.production.map, t) : undefined;
+      return html(res, renderScanResult({ nonce, paths, scanned, matches, timezone: config.timezone, personalizationKeywords: config.keywords, decisions }), nonce);
+    }
+    if ((sub === '/impressao' || sub === '/embalar') && filas && config.production) {
+      const options = { now: t, nonce, links: workflowLinks, envLabel: config.production.envLabel, healthBar, healthCss, refreshSeconds: 120 };
+      return html(res, sub === '/impressao' ? renderPrintQueue(queue, config.production.map, options) : renderPacking(queue, config.production.map, options), nonce);
     }
     if (sub === '/producao' && config.production) {
       const { map, historyLoader = loadSyncHistory, envLabel } = config.production;
@@ -123,6 +133,7 @@ export function createPanelHandler(config: PanelConfig) {
       return html(res, renderProduction(queue, map, history, {
         now: t, timezone: config.timezone, nonce, envLabel, listHref: base, refreshSeconds: 120,
         historyUnavailable, healthBar, nameFilter: req.method === 'GET' ? url.searchParams.get('nomes') : null,
+        ...(filas ? { workflowLinks } : {}),
       }), nonce);
     }
     return html(res, renderPanel(queue, { now: t, timezone: config.timezone, nonce, healthBar, personalizationKeywords: config.keywords, scanHref: paths.scan, productionHref: config.production ? `${base}/producao` : undefined }), nonce);
@@ -138,7 +149,7 @@ export function startPanel(env: NodeJS.ProcessEnv = process.env) {
     scanSecret: validScanSecret(env.SCAN_KEY),
     ...(env.HEALTH_MONITOR === '1' ? { health: { config: healthConfigFromEnv(env) } } : {}),
     ...(env.CENTRAL_PRODUCAO === '1' ? {
-      production: { map: loadComponentMap(env.COMPONENT_MAP_PATH ?? defaultComponentMapPath), envLabel: env.PANEL_ENV_LABEL },
+      production: { map: loadComponentMap(env.COMPONENT_MAP_PATH ?? defaultComponentMapPath), envLabel: env.PANEL_ENV_LABEL, filas: env.CENTRAL_PRODUCAO_FILAS === '1' },
     } : {}),
   });
   const port = Number(env.PANEL_PORT ?? 3100), host = env.PANEL_HOST ?? '127.0.0.1';

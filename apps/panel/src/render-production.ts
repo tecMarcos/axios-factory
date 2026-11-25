@@ -44,7 +44,7 @@ function syncSection(health: ReturnType<typeof computeSyncHealth>, timezone: str
   </section>`;
 }
 
-type Options = { now: number; timezone: string; nonce: string; envLabel?: string; listHref: string; refreshSeconds?: number; historyUnavailable?: boolean; nameFilter?: string | null; healthBar?: string };
+type Options = { now: number; timezone: string; nonce: string; envLabel?: string; listHref: string; refreshSeconds?: number; historyUnavailable?: boolean; nameFilter?: string | null; healthBar?: string; workflowLinks?: { print: string; packing: string } };
 
 export function renderProduction(queue: Queue, map: ComponentMap, history: History[], o: Options) {
   const { orders, totals, nameCounts, unmapped } = buildProductionView(queue, map, o.now);
@@ -90,7 +90,7 @@ export function renderProduction(queue: Queue, map: ComponentMap, history: Histo
     title: 'Produção', nonce: o.nonce, noScript: true, refreshSeconds: o.refreshSeconds,
     extraHead: `<style nonce="${esc(o.nonce)}">${css}${o.healthBar ? healthCss : ''}</style>`,
     body: `<main class="production">
-      <div class="titlebar"><h1>Central de Produção</h1><a class="btn" href="${esc(o.listHref)}">Pedidos</a></div>
+      <div class="titlebar"><h1>Central de Produção</h1><a class="btn" href="${esc(o.listHref)}">Pedidos</a>${o.workflowLinks ? `<a class="btn" href="${esc(o.workflowLinks.print)}">🖨️ Impressão</a><a class="btn" href="${esc(o.workflowLinks.packing)}">📦 Embalar</a>` : ''}</div>
       ${o.healthBar ? `${o.healthBar}\n      ` : ''}${o.envLabel ? `<div class="banner">${text(o.envLabel)}</div>` : ''}
       ${syncSection(health, o.timezone)}
       ${o.historyUnavailable ? '<p class="sync-stale">Histórico indisponível: falhas seguidas podem estar subestimadas</p>' : ''}

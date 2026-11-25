@@ -3,6 +3,8 @@ import { calculateHoursRemaining, calculatePriority } from '../../collector/src/
 import { defaultPersonalizationKeywords, personalizationStatus, type LiveOrder } from '../../collector/src/orders-view.js';
 import { normalizeCode, scanKeyFor, scannedCandidates } from '../../collector/src/scan-keys.js';
 import { card, esc, shell } from './render.js';
+import type { Decision } from '../../production/src/workflow.js';
+import { decisionBlock, decisionCss } from './render-workflow.js';
 
 /** Orders whose UpSeller number, marketplace number, tracking number or NF-e key matches what was scanned. */
 export function findOrders(queue: Queue, scanned: string, secret: string | undefined, now: number): LiveOrder[] {
@@ -83,7 +85,7 @@ export function renderScanPage(o: { nonce: string; paths: Paths; auto: boolean }
   });
 }
 
-export function renderScanResult(o: { nonce: string; paths: Paths; scanned: string; matches: LiveOrder[]; timezone: string; personalizationKeywords?: string[] }) {
+export function renderScanResult(o: { nonce: string; paths: Paths; scanned: string; matches: LiveOrder[]; timezone: string; personalizationKeywords?: string[]; decisions?: Map<string, Decision> }) {
   const keywords = o.personalizationKeywords ?? defaultPersonalizationKeywords;
   const next = `${o.paths.scan}?auto=1`;
   const found = o.matches.length > 0;
@@ -95,11 +97,15 @@ export function renderScanResult(o: { nonce: string; paths: Paths; scanned: stri
        <p class="muted">Pode ser um pedido que já foi enviado, ou que entrou depois da última atualização da lista (ela atualiza a cada 30 min).</p>`;
   return shell({
     title: found ? 'Pedido' : 'Não encontrado', nonce: o.nonce,
+    ...(o.decisions ? { extraHead: `<style nonce="${esc(o.nonce)}">${decisionCss}</style>` } : {}),
     body: `
 <div class="top"><div class="titlebar"><h1>Conferência</h1><a class="btn ghost" href="${esc(o.paths.list)}">Lista</a></div></div>
 <main>
   ${banner}
-  ${o.matches.map(m => card(m, { timezone: o.timezone, personalizationKeywords: keywords, large: true })).join('')}
+  ${o.matches.map(m => {
+    const decision = o.decisions?.get(`${m.platform ?? ''}|${m.account ?? ''}|${m.orderNumber}`);
+    return `${decision ? `<div class="wf">${decisionBlock(decision)}</div>` : ''}${card(m, { timezone: o.timezone, personalizationKeywords: keywords, large: true })}`;
+  }).join('')}
   <a class="btn big" href="${esc(next)}">📷 Bipar ${found ? 'o próximo' : 'de novo'}</a>
 </main>`,
   });
