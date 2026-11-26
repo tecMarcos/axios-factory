@@ -2,6 +2,7 @@ import type { Queue } from '../../collector/src/notifications.js';
 import { cleanText, formatRemaining, platformLabel, priorityLabels, stageLabel } from '../../collector/src/orders-view.js';
 import type { ComponentMap } from '../../production/src/component-map.js';
 import type { LiveOrder } from '../../collector/src/orders-view.js';
+import { liveCss, liveScript } from './live.js';
 import { PACK_TIME, type HistoryEvent, type PackedMap, type PackTime } from '../../production/src/packing-store.js';
 import { buildPackingQueue, buildPrintQueue, itemLabel, packingChecklist, type Decision, type PackingCard, type PrintJob } from '../../production/src/workflow.js';
 import { card, esc, shell, time } from './render.js';
@@ -11,10 +12,13 @@ type Links = { list: string; production: string; print: string; packing: string;
 /** Bancada com leitor: rotas de POST e o leitor de código já montado. */
 export type PackingStation = { confirm: string; undo: string; rename: string; device: { id: string; nome?: string }; scanner: { html: string; script: string };
   /** Carimbo do cronômetro oculto para o pedido aberto (vai num campo escondido do formulário). */
-  timer?: (key: string) => string };
+  timer?: (key: string) => string;
+  /** Sincronia entre celulares: endereço do /ao-vivo.json e versão atual do que a tela mostra. */
+  live?: { url: string; v: string } };
 type Options = { history?: HistoryEvent[]; historyQuery?: string; all?: boolean; view?: string | null; now: number; nonce: string; links: Links; envLabel?: string; healthBar?: string; healthCss?: string; refreshSeconds?: number; timezone?: string; packed?: PackedMap; station?: PackingStation };
 
 export const workflowCss = `
+${liveCss}
 .ptime{display:inline-block;font-size:13px;border-radius:6px;padding:1px 6px;margin-left:4px}
 .t-normal{background:var(--bg);color:var(--muted)}
 .t-rapido{background:var(--late);color:#fff;font-weight:700}
@@ -225,7 +229,7 @@ function stationCard(c: PackingCard, map: ComponentMap, o: Options, st: PackingS
       ? `<div><strong>Embalado às ${esc(time(Date.parse(c.decision.embaladoEm), tz))}</strong>${packedBy(c.decision)}${packTimeTag(c.decision.tempo)}
           <form class="inline" method="post" action="${esc(st.undo)}"><input type="hidden" name="k" value="${esc(c.key)}"><button type="submit">Desfazer</button></form></div>`
       : mode === 'embalado' ? '<div><strong>Aguardando coleta (UpSeller)</strong></div>' : decisionBlock(c.decision);
-  return `<article class="card p-${c.livePriority}${next ? ' next' : ''}">
+  return `<article class="card p-${c.livePriority}${next ? ' next' : ''}" data-key="${esc(c.key)}">
     <header>${next ? '<span class="tag-next">PRÓXIMO</span>' : ''}<span class="badge ${platformClass}">${text(platformLabel(c.platform))}</span>
       ${c.account ? `<span class="acct">${text(c.account)}</span>` : ''}
       <span class="due">${esc(formatRemaining(c.liveHours))}</span></header>
@@ -267,7 +271,7 @@ function renderStation(queue: Queue, map: ComponentMap, o: Options, st: PackingS
   const pending = proximo ? [proximo, ...fila] : [];
   const view = stationViews.find(v => v === o.view) ?? 'fila';
   const tab = (v: typeof stationViews[number], label: string, n: number) =>
-    `<a class="btn${view === v ? '' : ' ghost'}" href="${esc(o.links.packing)}${v === 'fila' ? '' : `?ver=${v}`}"${view === v ? ' aria-current="page"' : ''}>${label} (${n})</a>`;
+    `<a class="btn${view === v ? '' : ' ghost'}" href="${esc(o.links.packing)}${v === 'fila' ? '' : `?ver=${v}`}"${view === v ? ' aria-current="page"' : ''}>${label} (<span data-count="${v}">${n}</span>)</a>`;
   const body = view === 'historico' ? historyView(o, st)
     : view === 'fila'
     ? (pending.map((c, i) => stationCard(c, map, o, st, 'fila', i === 0)).join('') || '<p>Nada para embalar agora. 🎉</p>')
@@ -275,13 +279,15 @@ function renderStation(queue: Queue, map: ComponentMap, o: Options, st: PackingS
       ? (travados.map(c => stationCard(c, map, o, st, 'travado')).join('') || '<p>Nenhum pedido travado.</p>')
       : `<h2>Embalados na bancada (${embaladosAqui.length})</h2>${embaladosAqui.map(c => stationCard(c, map, o, st, 'embalado')).join('') || '<p>Nenhum ainda.</p>'}
          <h2>Aguardando coleta no UpSeller (${aguardandoColeta.length})</h2>${aguardandoColeta.map(c => stationCard(c, map, o, st, 'embalado')).join('') || '<p>Nenhum.</p>'}`;
+  const live = st.live ? liveScript({ url: st.live.url, v: st.live.v, mode: view === 'fila' ? 'fila' : 'pagina' }) : '';
   return page('Embalar', o, `
+    <div id="live" hidden></div>
     ${deviceBox(st)}
     <details class="scanner"${view === 'fila' ? ' open' : ''}><summary>📷 Bipar etiqueta</summary>
     ${st.scanner.html}</details>
     <p class="muted">Bipe a etiqueta ou escolha um pedido na lista. Depois responda "Sim" em todas as perguntas.</p>
     <nav class="tabs">${tab('fila', 'Falta embalar', pending.length)}${tab('travados', 'Não enviar', travados.length)}${tab('embalados', 'Embalados', embaladosAqui.length + aguardandoColeta.length)}<a class="btn${view === 'historico' ? '' : ' ghost'}" href="${esc(o.links.packing)}?ver=historico"${view === 'historico' ? ' aria-current="page"' : ''}>🗂️ Histórico</a></nav>
-    ${body}`, false, st.scanner.script);
+    ${body}`, false, st.scanner.script + live);
 }
 
 type ScanResult = { fromList?: boolean; scanned: string; matches: LiveOrder[]; cards: Map<string, PackingCard>; keyOf: (o: LiveOrder) => string; nextHref: string; personalizationKeywords: string[] };
@@ -307,7 +313,7 @@ export function renderPackingScan(map: ComponentMap, r: ScanResult, o: Options &
     const checks = packingChecklist(c, map, r.fromList).map(q => `<label class="q"><span>${text(q.pergunta)}${q.detalhe?.length ? `<div class="names">${q.detalhe.map(text).join(' · ')}</div>` : ''}</span>
         <span class="sim"><input type="checkbox" name="q" value="${esc(q.id)}" required> Sim</span></label>`).join('');
     return `${head}${decisionBlock(c.decision)}
-      <form method="post" action="${esc(o.station.confirm)}" autocomplete="off">
+      <form method="post" action="${esc(o.station.confirm)}" autocomplete="off" data-confirm>
         <input type="hidden" name="k" value="${esc(c.key)}">${o.station.timer ? `<input type="hidden" name="t0" value="${esc(o.station.timer(c.key))}">` : ''}${r.fromList ? '\n        <input type="hidden" name="origem" value="lista">' : ''}
         ${checks}
         <button class="btn big" type="submit">✅ Pedido embalado</button>
@@ -315,7 +321,9 @@ export function renderPackingScan(map: ComponentMap, r: ScanResult, o: Options &
   }).join('<hr>');
   const notFound = `<div class="done d-nao_enviar">❌ Não encontrei esse código</div>
     <p class="muted">Pode ser um pedido já enviado ou que entrou depois da última atualização da lista.</p>`;
-  return page('Embalar', o, `${blocks || notFound}<p><a class="btn big ghost" href="${esc(o.links.packing)}">← Voltar para a lista</a></p><p><a class="btn big" href="${esc(r.nextHref)}">📷 Bipar ${blocks ? 'outro' : 'de novo'}</a></p>`, false);
+  const open = r.matches.map(m => r.cards.get(r.keyOf(m))).filter(c => c?.decision.status === 'pode_enviar');
+  const live = o.station.live && open.length === 1 ? liveScript({ url: o.station.live.url, v: o.station.live.v, mode: 'pedido', key: open[0]!.key }) : undefined;
+  return page('Embalar', o, `${live ? '<div id="live" hidden></div>' : ''}${blocks || notFound}<p><a class="btn big ghost" href="${esc(o.links.packing)}">← Voltar para a lista</a></p><p><a class="btn big" href="${esc(r.nextHref)}">📷 Bipar ${blocks ? 'outro' : 'de novo'}</a></p>`, false, live);
 }
 
 /** Resposta depois de "Pedido embalado" ou "Desfazer". */

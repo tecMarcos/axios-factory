@@ -5,6 +5,7 @@ import type { PackedMap } from '../../production/src/packing-store.js';
 import { buildStageBoard, stageIds, stageInfo, type Piece, type StageEvent, type StageId, type StageState } from '../../production/src/stages.js';
 import type { PackingCard } from '../../production/src/workflow.js';
 import { deviceBox, workflowCss } from './render-workflow.js';
+import { liveScript } from './live.js';
 import { esc, shell, time } from './render.js';
 
 const text = (value: string | null | undefined) => esc(cleanText(value));
@@ -13,6 +14,7 @@ export type StagePaths = { board: string; mark: string; undo: string; rename: st
 export type StageOptions = {
   now: number; nonce: string; timezone: string; paths: StagePaths; device: { id: string; nome?: string };
   view?: string | null; envLabel?: string; healthBar?: string; healthCss?: string; history?: StageEvent[];
+  live?: { url: string; v: string };
 };
 
 const css = `
@@ -163,9 +165,10 @@ export function renderStageBoard(queue: Queue, map: ComponentMap, state: StageSt
       : view === 'colar' ? 'Aparece aqui quando a mão e os nomes 3D já foram impressos. Cole e marque; o pedido vai para “Prontos para embalar”.'
         : view === 'separar' ? 'Separe as peças de cada pedido e marque.' : '';
   return shell({
-    title: 'Produção', nonce: o.nonce, script: copyScript,
+    title: 'Produção', nonce: o.nonce, script: copyScript + (o.live ? liveScript({ url: o.live.url, v: o.live.v, mode: 'pagina', field: 'vp' }) : ''),
     extraHead: `<style nonce="${esc(o.nonce)}">${workflowCss}${css}${o.healthBar && o.healthCss ? o.healthCss : ''}</style>`,
     body: `<main class="wf pb">
+      <div id="live" hidden></div>
       <div class="titlebar"><h1>🏭 Produção</h1></div>
       <nav class="nav"><a class="btn" href="${esc(o.paths.list)}">Pedidos</a><a class="btn" href="${esc(o.paths.packing)}">📦 Embalar</a><a class="btn ghost" href="${esc(href('historico'))}">🗂️ Histórico</a><a class="btn ghost" href="${esc(o.paths.details)}">ℹ️ Detalhes</a></nav>
       ${o.healthBar ?? ''}${o.envLabel ? `<div class="banner">${text(o.envLabel)}</div>` : ''}

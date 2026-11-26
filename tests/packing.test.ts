@@ -159,7 +159,7 @@ test('bancada: bipar, responder Sim em tudo, marcar embalado e desfazer', async 
 
   const after = (await request(on, base + '/embalar')).body;
   assert.doesNotMatch(after, /FAKEM1/, 'sai da fila');
-  assert.match(after, /Embalados \(1\)/);
+  assert.match(after, /Embalados \(<span data-count="embalados">1<\/span>\)/);
   const packedTab = (await request(on, base + '/embalar?ver=embalados')).body;
   assert.match(packedTab, /Embalados na bancada \(1\)[\s\S]*FAKEM1[\s\S]*Embalado às 09:00/);
   assert.match((await request(on, base + '/embalar?ver=travados')).body, /FAKESEM[\s\S]*NÃO ENVIAR/);
@@ -190,7 +190,7 @@ test('bancada: escolher o pedido na lista, com foto, pede para confirmar a etiqu
   assert.ok(list.indexOf('FAKEP1') < list.indexOf('FAKEP2'), 'prazo mais curto primeiro');
   assert.match(list, /PRÓXIMO[\s\S]*FAKEP1/);
   assert.match(list, /<img src="https:\/\/cf\.shopee\.com\.br\/file\/biscoito\.jpg"/);
-  assert.match(list, /Falta embalar \(2\)/);
+  assert.match(list, /Falta embalar \(<span data-count="fila">2<\/span>\)/);
   assert.equal((list.match(/📦 Embalar este/g) ?? []).length, 2);
 
   const key = 'shopee|Conta Teste|P2';

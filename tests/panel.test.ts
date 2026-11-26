@@ -154,7 +154,7 @@ test('server: right token shows the panel with strict headers; anything else is 
   assert.match(body, /Nome: Ana/);
   assert.equal(ok.headers.get('cache-control'), 'no-store');
   assert.equal(ok.headers.get('referrer-policy'), 'no-referrer');
-  assert.match(ok.headers.get('content-security-policy')!, /default-src 'none'; img-src https:; media-src 'self' blob: mediastream:; style-src 'nonce-[^']+'; script-src 'nonce-[^']+'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'/);
+  assert.match(ok.headers.get('content-security-policy')!, /default-src 'none'; img-src https:; media-src 'self' blob: mediastream:; style-src 'nonce-[^']+'; script-src 'nonce-[^']+'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'/);
   const nonce = /script-src 'nonce-([^']+)'/.exec(ok.headers.get('content-security-policy')!)![1]!;
   assert.ok(body.includes(`<script nonce="${nonce}">`));
   for (const path of ['/', `/p/${token}x`, '/p/wrong', `/P/${token}`, `/p/${token}/extra`, '/p/%E0%A4%A']) {

@@ -19,6 +19,8 @@ import { decisionsFor, orderLines, packingCards, packingChecklist } from '../../
 import { classifyPackTime, cleanDeviceName, deviceIdPattern, loadHistory, loadPacked, markPacked, orderKey, unmarkPacked, validPackingDir, type Device, type PackedMap } from '../../production/src/packing-store.js';
 import { renderPackingDone, renderPackingScan } from './render-workflow.js';
 import { createPackTimer } from './pack-timer.js';
+import { claimOrder, liveState, releaseOrder, type Working } from './live.js';
+import { buildPackingQueue } from '../../production/src/workflow.js';
 import { renderStageBoard, renderStageDone } from './render-stages.js';
 import { applyStages, buildStageBoard, loadStageHistory, loadStages, stageIds, stageInfo, type Piece, type StageId } from '../../production/src/stages.js';
 import { healthCss } from './render.js';
@@ -39,13 +41,14 @@ const baseHeaders = {
   'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex, nofollow',
   'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Permissions-Policy': 'camera=(self), microphone=(), geolocation=()',
 };
-const csp = (nonce: string) => `default-src 'none'; img-src https:; media-src 'self' blob: mediastream:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
+const csp = (nonce: string) => `default-src 'none'; img-src https:; media-src 'self' blob: mediastream:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
 
 function send(res: ServerResponse, status: number, body: string | Buffer, headers: Record<string, string> = {}) {
   res.writeHead(status, { ...baseHeaders, 'Content-Type': 'text/plain; charset=utf-8', ...headers });
   res.end(res.req.method === 'HEAD' ? undefined : body);
 }
-const html = (res: ServerResponse, body: string, nonce: string, status = 200, extra: Record<string, string> = {}) => send(res, status, body, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': csp(nonce), ...extra });
+// no-store: o celular nunca mostra uma cópia velha guardada (ex.: ao voltar para a aba ou apertar "voltar").
+const html = (res: ServerResponse, body: string, nonce: string, status = 200, extra: Record<string, string> = {}) => send(res, status, body, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': csp(nonce), 'Cache-Control': 'no-store', ...extra });
 
 // Aparelho da bancada: um ID único por celular (cookie só deste painel) + nome opcional.
 const DEVICE_COOKIE = 'axf_dev';
@@ -75,6 +78,8 @@ export function createPanelHandler(config: PanelConfig) {
   const now = config.now ?? Date.now;
   const libPath = config.scannerLibPath ?? defaultScannerLib;
   const packTimer = createPackTimer();
+  // Quem está com qual pedido aberto agora (só em memória; some ao embalar, ao abrir outro ou em 15 min).
+  const working: Working = new Map();
   let lib: Promise<Buffer | null> | undefined;
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://panel');
@@ -95,7 +100,7 @@ export function createPanelHandler(config: PanelConfig) {
     const stagesDir = packingDir && config.production?.etapas ? packingDir : undefined;
     const stagePost = stagesDir !== undefined && (sub === '/etapa' || sub === '/etapa-voltar');
     const allowed = sub === '/bipar' || (sub === '/embalar' && packingDir) ? ['GET', 'HEAD', 'POST'] : stationPost || stagePost ? ['POST'] : ['GET', 'HEAD'];
-    if (!['', '/bipar', '/leitor.js'].includes(sub) && !(sub === '/producao' && config.production) && !((sub === '/impressao' || sub === '/embalar') && filas) && !stationPost && !stagePost && !(sub === '/saude.json' && config.health)) return send(res, 404, 'Não encontrado');
+    if (!['', '/bipar', '/leitor.js'].includes(sub) && !(sub === '/producao' && config.production) && !((sub === '/impressao' || sub === '/embalar') && filas) && !stationPost && !stagePost && !(sub === '/saude.json' && config.health) && !(sub === '/ao-vivo.json' && packingDir)) return send(res, 404, 'Não encontrado');
     if (!allowed.includes(req.method ?? '')) return send(res, 405, 'Método não permitido', { Allow: allowed.join(', ') });
 
     if (sub === '/leitor.js') {
@@ -122,6 +127,20 @@ export function createPanelHandler(config: PanelConfig) {
       return send(res, 503, 'Os dados dos pedidos ainda não estão disponíveis. Tente de novo em alguns minutos.', { 'Retry-After': '120' });
     }
     const t = now();
+    /** Estado compartilhado entre celulares; a mesma conta serve a página e o /ao-vivo.json. */
+    const live = (packed: PackedMap, me: string | null, stageState?: Awaited<ReturnType<typeof loadStages>>) => {
+      const pq = buildPackingQueue(queue!, config.production!.map, t, packed, { all: true });
+      const pending = pq.proximo ? [pq.proximo, ...pq.fila] : [];
+      return liveState({ packed, working, now: t, me, timezone: config.timezone, fila: pending.map(c => c.key),
+        contagem: { fila: pending.length, travados: pq.travados.length, embalados: pq.embaladosAqui.length + pq.aguardandoColeta.length },
+        extra: stageState ? [...stageState].sort(([a], [b]) => a.localeCompare(b)) : undefined });
+    };
+    if (sub === '/ao-vivo.json' && packingDir && queue && config.production) {
+      try {
+        const [packed, stageState] = await Promise.all([loadPacked(packingDir), stagesDir ? loadStages(stagesDir) : Promise.resolve(undefined)]);
+        return send(res, 200, JSON.stringify(live(packed, readDevice(req)?.id ?? null, stageState)), { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      } catch { return send(res, 503, '{}', { 'Content-Type': 'application/json; charset=utf-8', 'Retry-After': '10' }); }
+    }
     let healthBar: string | undefined;
     if (config.health && scanned === undefined && !form) {
       const [health, notify] = await Promise.all([
@@ -162,7 +181,8 @@ export function createPanelHandler(config: PanelConfig) {
       const page = (body: string, status = 200) => html(res, body, nonce, status, cookieHeaders);
       const station = packingDir ? { ...stationPaths, device: device!, rename: `${base}/aparelho`, scanner: scannerWidget({ action: `${base}/embalar`, lib: paths.lib, auto: url.searchParams.get('auto') === '1' }),
         // Cronômetro oculto: só começa para quem já tem aparelho identificado (sem cookie não dá para salvar).
-        ...(hadDevice ? { timer: (key: string) => packTimer.start(key, device!.id, t) } : {}) } : undefined;
+        ...(hadDevice ? { timer: (key: string) => packTimer.start(key, device!.id, t) } : {}),
+        live: { url: `${base}/ao-vivo.json`, v: '' } } : undefined;
       const wantsHistory = !!packingDir && req.method === 'GET' && sub === '/embalar' && url.searchParams.get('ver') === 'historico';
       let history: Awaited<ReturnType<typeof loadHistory>> | undefined;
       if (wantsHistory) {
@@ -179,6 +199,10 @@ export function createPanelHandler(config: PanelConfig) {
           : findOrders(queue, form.get('c')?.slice(0, 300) ?? '', config.scanSecret, t);
         console.log(JSON.stringify({ event: picked ? 'pack_pick' : 'pack_scan', matched: matches.length }));
         const cards = new Map(packingCards({ ...queue, orders: matches }, map, t, packed, { all: true }).map(c => [c.key, c]));
+        // "Fulano está embalando": só para pedido liberado e aparelho identificado.
+        const opened = [...cards.values()].filter(c => c.decision.status === 'pode_enviar');
+        if (hadDevice) claimOrder(working, opened.length === 1 ? opened[0]!.key : null, device!, t);
+        station.live!.v = live(packed, device!.id).v;
         return page(renderPackingScan(map, { fromList: !!picked, scanned: '', matches, cards, keyOf: orderKey, nextHref, personalizationKeywords: config.keywords }, { ...options, station }));
       }
       if (station && form && stationPost) {
@@ -209,6 +233,7 @@ export function createPanelHandler(config: PanelConfig) {
           const seconds = packTimer.elapsed(form.get('t0'), key, device!.id, t);
           const tempo = seconds === null ? undefined : classifyPackTime(seconds);
           await markPacked(packingDir!, key, checks.map(q => q.id), t, device!, { pedido: card.displayId, itens: orderLines(card, map) }, tempo);
+          releaseOrder(working, key);
           console.log(JSON.stringify({ event: 'pack_marked', checks: checks.length, device: device!.id, ...(tempo ? { seconds: tempo.segundos, timing: tempo.status } : { timing: 'sem_tempo' }) }));
           return done(200, true, `✅ ${card.displayId} embalado`, 'Pode colar a etiqueta e separar para a coleta.');
         } catch {
@@ -216,6 +241,7 @@ export function createPanelHandler(config: PanelConfig) {
           return done(500, false, 'Não consegui salvar. Tente de novo.');
         }
       }
+      if (station) station.live!.v = live(packed, device!.id).v;
       return page(sub === '/impressao' ? renderPrintQueue(queue, map, options) : renderPacking(queue, map, options));
     }
     const stageView = req.method === 'GET' ? url.searchParams.get('ver') : null;
@@ -274,7 +300,7 @@ export function createPanelHandler(config: PanelConfig) {
         try { history = await loadStageHistory(stagesDir, 500); }
         catch { return send(res, 503, 'Não consegui ler o histórico. Tente de novo.', { 'Retry-After': '30' }); }
       }
-      return page(renderStageBoard(queue, map, state, packed, { ...stageOptions, history }));
+      return page(renderStageBoard(queue, map, state, packed, { ...stageOptions, history, live: { url: `${base}/ao-vivo.json`, v: live(packed, device.id, state).vp } }));
     }
     if (sub === '/producao' && config.production) {
       const { map, historyLoader = loadSyncHistory, envLabel } = config.production;
